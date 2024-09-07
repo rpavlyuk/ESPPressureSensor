@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Device Configuration: {VAL_DEVICE_ID} </title>
+</head>
+<body>
+    <h2>Configure Device: {VAL_DEVICE_ID}</h2>
+    <h3>Serial: {VAL_DEVICE_SERIAL}</h3><br/>
+    <h3>{VAL_MESSAGE}</h3>
+    <form action="/submit" method="POST">
+        <table border="0">
+            <tr><td><b>MQTT</b></td><td></td></tr>
+            <tr><td>MQTT Server:</td><td><input type="text" name="mqtt_server" value="{VAL_MQTT_SERVER}"></td></tr>           
+            <tr><td> MQTT Port:</td><td><input type="number" name="mqtt_port" value="{VAL_MQTT_PORT}"></td></tr>
+            <tr><td>MQTT Protocol:</td><td><input type="text" name="mqtt_protocol" value="{VAL_MQTT_PROTOCOL}"></td></tr>
+            <tr><td>MQTT User:</td><td><input type="text" name="mqtt_user" value="{VAL_MQTT_USER}"></td></tr>
+            <tr><td>MQTT Password:</td><td><input type="password" name="mqtt_password" value="{VAL_MQTT_PASSWORD}"></td></tr>
+            <tr><td>MQTT Prefix:</td><td><input type="text" name="mqtt_prefix" value="{VAL_MQTT_PREFIX}"></td></tr>
+            <tr><td><b>Sensor Parameters</b></td><td></td></tr>
+            <tr><td>Sensor Offset:</td><td><input type="number" step="0.001" name="sensor_offset" value="{VAL_SENSOR_OFFSET}"></td></tr>
+            <tr><td>Sensor Linear Multiplier:</td><td><input type="number" step="10" name="sensor_linear_multiplier" value="{VAL_SENSOR_LINEAR_MULTIPLIER}"></td></tr>
+        </table>
+        <input type="submit" value="Save Settings">
+    </form>
+    <br/>
+    <h3>Device Management</h3>
+    <!-- Reboot button -->
+    <form action="/reboot" method="POST">
+        <input type="submit" value="Reboot Device">
+    </form>
+</body>
+</html>

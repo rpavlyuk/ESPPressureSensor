@@ -10,6 +10,8 @@
 
 #include "common.h"
 #include "sensor.h"
+#include "settings.h"
+#include "non_volatile_storage.h"
 
 #define NUM_SAMPLES             50  // Number of samples to collect
 #define SAMPLE_INTERVAL_MS      10  // Interval between samples in milliseconds
@@ -19,11 +21,7 @@ int samples[NUM_SAMPLES];
 float filtered_samples[NUM_SAMPLES];
 int num_filtered_samples = 0;
 
-const float OffSet = 0.471;  // Offset voltage in volts
-float V, P;
-
-static int adc_raw[2][10];
-static int voltage[2][10];
+sensor_data_t sensor_data;
 
 /*---------------------------------------------------------------
         ADC Calibration
@@ -92,6 +90,23 @@ void sensor_adc_calibration_deinit(adc_cali_handle_t handle)
 
 
 void sensor_run() {
+
+    // wait for the device to become ready
+    ESP_LOGI(TAG, "Waiting for device to become ready");
+    int attempt = 0;
+    int max_attempts = 255;
+    while(device_ready < 1)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        ESP_LOGD(TAG, "Attempt #%i", attempt++);
+        if (attempt > max_attempts)
+        {
+            ESP_LOGI(TAG, "Max attempts to make device ready reached. Trying to continue and hoping for the best...");
+            break;
+        }      
+    }
+    
+
     // Initialize ADC for the pressure sensor
     //-------------ADC1 Init---------------//
     adc_oneshot_unit_handle_t adc1_handle;
@@ -129,17 +144,19 @@ void sensor_run() {
         */
         // Read the raw sensor value from ADC
         // int raw_adc_value = adc_raw[0][0];
-        int raw_adc_value = perform_smart_sampling(adc1_cali_pressure_sensor_handle, adc1_handle, PRESSURE_SENSOR_PIN, do_calibration1_pressure_sensor);
+        sensor_data.voltage_raw = perform_smart_sampling(adc1_cali_pressure_sensor_handle, adc1_handle, PRESSURE_SENSOR_PIN, do_calibration1_pressure_sensor);
 
         // Obtain the voltage in Volts
-        V = raw_adc_value / 1000.0;
+        sensor_data.voltage = sensor_data.voltage_raw / 1000.0;
 
         // Calculate pressure in KPa using the provided formula
-        P = (V - OffSet) * 250000;  // Convert voltage to pressure in KPa
+        ESP_ERROR_CHECK(nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_data.voltage_offset));
+        ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, &sensor_data.sensor_linear_multiplier));;
+        sensor_data.pressure = (sensor_data.voltage - sensor_data.voltage_offset) * sensor_data.sensor_linear_multiplier;  // Convert voltage to pressure in Pa
 
         // Print voltage and pressure to Serial Monitor
         ESP_LOGI(TAG, "Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.2f Pa", 
-                 raw_adc_value, V, P);
+                 sensor_data.voltage_raw, sensor_data.voltage, sensor_data.pressure);
 
         vTaskDelay(pdMS_TO_TICKS(3000));  // Delay 1000 milliseconds
     }

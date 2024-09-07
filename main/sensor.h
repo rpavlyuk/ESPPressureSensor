@@ -9,6 +9,20 @@
 #define ADC_WIDTH               ADC_WIDTH_BIT_12        // 12-bit ADC width for higher resolution
 #define ADC_ATTEN               ADC_ATTEN_DB_2_5        // Set attenuation
 
+/**
+ * Sensor readings information
+ */
+typedef struct {
+    float voltage;
+    int voltage_raw;
+    float voltage_offset;
+    float pressure;
+    uint32_t sensor_linear_multiplier;
+} sensor_data_t;
+
+extern sensor_data_t sensor_data;
+
+
 bool sensor_adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle);
 void sensor_adc_calibration_deinit(adc_cali_handle_t handle);
 

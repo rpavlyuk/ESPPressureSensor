@@ -17,6 +17,8 @@
     "files.associations": {
         "adc_cali.h": "c",
         "adc_oneshot.h": "c",
-        "scheme_softap.h": "c"
+        "scheme_softap.h": "c",
+        "esp_system.h": "c",
+        "non_volatile_storage.h": "c"
     }
 }

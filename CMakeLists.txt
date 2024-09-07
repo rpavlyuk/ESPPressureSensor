@@ -7,3 +7,7 @@ project(ESPZPressureSensor)
 
 # Set the target
 set(IDF_TARGET "esp32c6")
+
+# SPIFFS flash
+# create SPIFF partition
+spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT)

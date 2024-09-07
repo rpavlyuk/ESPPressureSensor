@@ -30,19 +30,6 @@ void generate_softap_credentials() {
     ESP_LOGI(TAG, "Generated Password: %s", softap_password);
 }
 
-// Function to initialize NVS
-void init_nvs() {
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "Initializing NVS ...");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    } else {
-        ESP_LOGW(TAG, "NVS already initialized");
-    }
-    ESP_ERROR_CHECK(ret);
-}
-
 // Function to handle Wi-Fi and IP events
 static void wifi_provisioning_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     if (event_base == WIFI_PROV_EVENT && event_id == WIFI_PROV_START) {
