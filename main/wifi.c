@@ -15,6 +15,8 @@
 char softap_ssid[32];       // Buffer for the generated SSID
 char softap_password[64];   // Buffer for the generated password
 
+esp_netif_t *esp_netif_sta;
+
 
 void generate_softap_credentials() {
     uint8_t mac[6];  // Array to hold the MAC address
@@ -62,7 +64,7 @@ void initialize_wifi() {
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_provisioning_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_provisioning_event_handler, NULL));  // Corrected registration
 
-    esp_netif_create_default_wifi_sta();
+    esp_netif_sta = esp_netif_create_default_wifi_sta();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 }
@@ -84,5 +86,29 @@ void start_wifi(bool provisioned) {
         // Start Wi-Fi with stored credentials
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
+        
+        esp_netif_dns_info_t dns_info;
+        // Get the DNS info for the main DNS server
+        esp_err_t err = esp_netif_get_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns_info);
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "DNS IP: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
+        } else {
+            ESP_LOGE(TAG, "Failed to retrieve DNS info: %s", esp_err_to_name(err));
+        }
+
+        esp_netif_dns_info_t dns;
+        dns.ip.u_addr.ip4.addr = esp_ip4addr_aton("8.8.8.8");  // Set Google's DNS server
+        esp_netif_set_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns);
+
+        err = esp_netif_get_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns_info);
+
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "DNS IP after manual setting: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
+        } else {
+            ESP_LOGE(TAG, "Failed to retrieve DNS info after manual setting: %s", esp_err_to_name(err));
+        }
+
     }
+
 }

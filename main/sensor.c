@@ -11,6 +11,7 @@
 #include "common.h"
 #include "sensor.h"
 #include "settings.h"
+#include "mqtt.h"
 #include "non_volatile_storage.h"
 
 #define NUM_SAMPLES             50  // Number of samples to collect
@@ -157,6 +158,9 @@ void sensor_run() {
         // Print voltage and pressure to Serial Monitor
         ESP_LOGI(TAG, "Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.2f Pa", 
                  sensor_data.voltage_raw, sensor_data.voltage, sensor_data.pressure);
+
+        // Publish the sensor data via MQTT
+        mqtt_publish_sensor_data(&sensor_data);
 
         vTaskDelay(pdMS_TO_TICKS(3000));  // Delay 1000 milliseconds
     }

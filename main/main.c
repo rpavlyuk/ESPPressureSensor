@@ -11,6 +11,7 @@
 #include "wifi.h"
 #include "sensor.h"
 #include "web.h"
+#include "mqtt.h"
 
 void app_main(void) {
     
@@ -55,6 +56,14 @@ void app_main(void) {
 
     // start web
     start_webserver();
+
+    // start MQTT client
+    if (mqtt_init() == ESP_OK) {
+        ESP_LOGI(TAG, "Connected to MQTT server!");
+    } else {
+        ESP_LOGE(TAG, "Unable to connect to MQTT broker");
+        return;
+    }
 
     // run the sensor
     sensor_run();
