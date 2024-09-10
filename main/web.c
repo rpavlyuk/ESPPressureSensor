@@ -172,6 +172,20 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_SENSOR_LINEAR_MULTIPLIER}", sensor_linear_multiplier_str);
     replace_placeholder(html_output, "{VAL_MESSAGE}", message);
 
+    // replace size fields
+    char f_len[10];
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_SERVER_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_SERVER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PROTOCOL_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PROTOCOL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_USER_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_USER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PASSWORD_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PASSWORD}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PREFIX_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PREFIX}", f_len);
+
+
     // Send the final HTML response
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html_output, strlen(html_output));
@@ -321,6 +335,19 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_SENSOR_OFFSET}", sensor_offset_str);
     replace_placeholder(html_output, "{VAL_SENSOR_LINEAR_MULTIPLIER}", sensor_linear_multiplier_str);
     replace_placeholder(html_output, "{VAL_MESSAGE}", success_message);
+
+    // replace size fields
+    char f_len[10];
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_SERVER_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_SERVER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PROTOCOL_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PROTOCOL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_USER_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_USER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PASSWORD_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PASSWORD}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PREFIX_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PREFIX}", f_len);
 
     // Send the final HTML response
     httpd_resp_set_type(req, "text/html");

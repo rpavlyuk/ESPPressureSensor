@@ -13,7 +13,7 @@ extern int device_ready;
  */
 #define DEVICE_SERIAL_LENGTH    32
 #define DEVICE_ID_LENGTH        12
-#define MQTT_SERVER_LENGTH       64
+#define MQTT_SERVER_LENGTH       128
 #define MQTT_PROTOCOL_LENGTH     10
 #define MQTT_USER_LENGTH         64
 #define MQTT_PASSWORD_LENGTH     64
@@ -54,10 +54,10 @@ extern int device_ready;
 
 #define S_DEFAULT_MQTT_SERVER       "127.0.0.1"
 #define S_DEFAULT_MQTT_PORT         1883
-#define S_DEFAULT_MQTT_PROTOCOL     "tcp"
+#define S_DEFAULT_MQTT_PROTOCOL     "mqtt"
 #define S_DEFAULT_MQTT_USER         ""
 #define S_DEFAULT_MQTT_PASSWORD     ""
-#define S_DEFAULT_MQTT_PREFIX       "pressure_sensor/"
+#define S_DEFAULT_MQTT_PREFIX       "pressure_sensor"
 
 #define S_DEFAULT_SENSOR_OFFSET               0.471
 #define S_DEFAULT_SENSOR_LINEAR_MULTIPLIER    250000
