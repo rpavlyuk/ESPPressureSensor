@@ -10,6 +10,7 @@
 #include "common.h"
 #include "settings.h"
 #include "sensor.h"
+#include "zigbee.h"
 #include "web.h"
 
 void init_filesystem() {
@@ -69,6 +70,15 @@ void start_webserver(void) {
             .user_ctx = NULL
         };
         httpd_register_uri_handler(server, &reboot_uri);
+
+        // Register the Zigbee connect handler
+        httpd_uri_t connect_zigbee_uri = {
+            .uri       = "/connect-zigbee",
+            .method    = HTTP_POST,
+            .handler   = connect_zigbee_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &connect_zigbee_uri);
 
     } else {
         ESP_LOGI(TAG, "Error starting server!");
@@ -458,5 +468,38 @@ static esp_err_t reboot_handler(httpd_req_t *req) {
 
     // Reboot the device
     esp_restart();
+    return ESP_OK;
+}
+
+// Handle Zigbee connection request
+static esp_err_t connect_zigbee_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Received Zigbee connection request");
+
+    // Send HTML response with a redirect after 30 seconds
+    const char *connect_mqtt_html = "<html>"
+                                "<head>"
+                                    "<title>Connecting MQTT...</title>"
+                                    "<meta http-equiv=\"refresh\" content=\"30;url=/\" />"
+                                    "<script>"
+                                        "setTimeout(function() { window.location.href = '/'; }, 5000);"
+                                    "</script>"
+                                "</head>"
+                                "<body>"
+                                    "<h2>MQTT connection / pairing has been initiated.</h2>"
+                                    "<p>Please wait, you will be redirected to the <a href=\"/\">home page</a> in 5 seconds.</p>"
+                                "</body>"
+                              "</html>";
+
+    // Call Zigbee initialization function
+    // esp_err_t err = zigbee_init_sensor();
+
+    esp_err_t err = ESP_OK;
+
+    if (err == ESP_OK) {
+        httpd_resp_send(req, connect_mqtt_html, HTTPD_RESP_USE_STRLEN);
+    } else {
+        httpd_resp_sendstr(req, "Failed to initialize Zigbee.");
+    }
+
     return ESP_OK;
 }

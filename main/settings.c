@@ -15,6 +15,7 @@ esp_err_t settings_init() {
 
     // reset device readiness
     device_ready = 0;
+    bool is_dynamically_allocated = false;
 
     // Parameter: sensor offset
     if (nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_data.voltage_offset) == ESP_OK) {
@@ -48,6 +49,7 @@ esp_err_t settings_init() {
     char *mqtt_server = NULL;
     if (nvs_read_string(S_NAMESPACE, S_KEY_MQTT_SERVER, &mqtt_server) == ESP_OK) {
         ESP_LOGI(TAG, "Found parameter %s in NVS: %s", S_KEY_MQTT_SERVER, mqtt_server);
+        is_dynamically_allocated = true;
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_MQTT_SERVER);
         mqtt_server = S_DEFAULT_MQTT_SERVER;
@@ -58,7 +60,10 @@ esp_err_t settings_init() {
             return ESP_FAIL;
         }
     }
-    free(mqtt_server); // for string (char*) params only
+    if (is_dynamically_allocated) {
+        free(mqtt_server); // for string (char*) params only
+        is_dynamically_allocated = false;
+    }
 
     // Parameter: MQTT port
     uint16_t mqtt_port;
@@ -79,6 +84,7 @@ esp_err_t settings_init() {
     char *mqtt_protocol = NULL;
     if (nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PROTOCOL, &mqtt_protocol) == ESP_OK) {
         ESP_LOGI(TAG, "Found parameter %s in NVS: %s", S_KEY_MQTT_PROTOCOL, mqtt_protocol);
+        is_dynamically_allocated = true;
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_MQTT_PROTOCOL);
         mqtt_protocol = S_DEFAULT_MQTT_PROTOCOL;
@@ -89,12 +95,16 @@ esp_err_t settings_init() {
             return ESP_FAIL;
         }
     }
-    free(mqtt_protocol); // for string (char*) params only
+    if (is_dynamically_allocated) {
+        free(mqtt_protocol); // for string (char*) params only
+        is_dynamically_allocated = false;
+    }
 
     // Parameter: MQTT user
     char *mqtt_user = NULL;
     if (nvs_read_string(S_NAMESPACE, S_KEY_MQTT_USER, &mqtt_user) == ESP_OK) {
         ESP_LOGI(TAG, "Found parameter %s in NVS: %s", S_KEY_MQTT_USER, mqtt_user);
+        is_dynamically_allocated = true;
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_MQTT_USER);
         mqtt_user = S_DEFAULT_MQTT_USER;
@@ -105,12 +115,16 @@ esp_err_t settings_init() {
             return ESP_FAIL;
         }
     }
-    free(mqtt_user); // for string (char*) params only
+    if (is_dynamically_allocated) {
+        free(mqtt_user); // for string (char*) params only
+        is_dynamically_allocated = false;
+    }
 
     // Parameter: MQTT password
     char *mqtt_password = NULL;
     if (nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PASSWORD, &mqtt_password) == ESP_OK) {
         ESP_LOGI(TAG, "Found parameter %s in NVS: %s", S_KEY_MQTT_PASSWORD, mqtt_password);
+        is_dynamically_allocated = true;
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_MQTT_PASSWORD);
         mqtt_password = S_DEFAULT_MQTT_PASSWORD;
@@ -121,12 +135,16 @@ esp_err_t settings_init() {
             return ESP_FAIL;
         }
     }
-    free(mqtt_password); // for string (char*) params only
+    if (is_dynamically_allocated) {
+        free(mqtt_password); // for string (char*) params only
+        is_dynamically_allocated = false;
+    }
 
     // Parameter: MQTT prefix
     char *mqtt_prefix = NULL;
     if (nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix) == ESP_OK) {
         ESP_LOGI(TAG, "Found parameter %s in NVS: %s", S_KEY_MQTT_PREFIX, mqtt_prefix);
+        is_dynamically_allocated = true;
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_MQTT_PREFIX);
         mqtt_prefix = S_DEFAULT_MQTT_PREFIX;
@@ -137,7 +155,10 @@ esp_err_t settings_init() {
             return ESP_FAIL;
         }
     }
-    free(mqtt_prefix); // for string (char*) params only
+    if (is_dynamically_allocated) {
+        free(mqtt_prefix); // for string (char*) params only
+        is_dynamically_allocated = false;
+    }
 
     // Parameter: Device ID (actually, MAC)
     char device_id[DEVICE_ID_LENGTH + 1];

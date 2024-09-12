@@ -16,7 +16,7 @@ char softap_ssid[32];       // Buffer for the generated SSID
 char softap_password[64];   // Buffer for the generated password
 
 esp_netif_t *esp_netif_sta;
-
+bool g_wifi_ready = false;
 
 void generate_softap_credentials() {
     uint8_t mac[6];  // Array to hold the MAC address
@@ -43,14 +43,18 @@ static void wifi_provisioning_event_handler(void* arg, esp_event_base_t event_ba
                  (const char *) wifi_sta_cfg->password);
     } else if (event_base == WIFI_PROV_EVENT && event_id == WIFI_PROV_END) {
         wifi_prov_mgr_deinit();
+        ESP_LOGI(TAG, "Wi-Fi Provisioning completed. Restarting the device now.");
+        esp_restart();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {  // Corrected event
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "Got IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
+        g_wifi_ready = true;
+        log_network_configuration(event->esp_netif);
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGI(TAG, "Disconnected from Wi-Fi network, reconnecting...");
         esp_wifi_connect();
+        g_wifi_ready = false;
     }
 }
 
@@ -86,29 +90,44 @@ void start_wifi(bool provisioned) {
         // Start Wi-Fi with stored credentials
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_start());
-        
-        esp_netif_dns_info_t dns_info;
-        // Get the DNS info for the main DNS server
-        esp_err_t err = esp_netif_get_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns_info);
-
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "DNS IP: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
-        } else {
-            ESP_LOGE(TAG, "Failed to retrieve DNS info: %s", esp_err_to_name(err));
-        }
 
         esp_netif_dns_info_t dns;
         dns.ip.u_addr.ip4.addr = esp_ip4addr_aton("8.8.8.8");  // Set Google's DNS server
         esp_netif_set_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns);
 
-        err = esp_netif_get_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns_info);
-
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "DNS IP after manual setting: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
-        } else {
-            ESP_LOGE(TAG, "Failed to retrieve DNS info after manual setting: %s", esp_err_to_name(err));
-        }
-
     }
 
+}
+
+
+void log_network_configuration(esp_netif_t *esp_netif_sta) {
+    esp_netif_ip_info_t ip_info;
+
+    ESP_LOGI(TAG, "+---- WIFI Connection Information ----+");
+    // Get IP information (IP, netmask, and gateway)
+    if (esp_netif_get_ip_info(esp_netif_sta, &ip_info) == ESP_OK) {
+        ESP_LOGI(TAG, "IP Address: " IPSTR, IP2STR(&ip_info.ip));
+        ESP_LOGI(TAG, "Netmask: " IPSTR, IP2STR(&ip_info.netmask));
+        ESP_LOGI(TAG, "Gateway: " IPSTR, IP2STR(&ip_info.gw));
+    } else {
+        ESP_LOGE(TAG, "Failed to get IP information");
+    }
+
+    // get DNS
+    esp_netif_dns_info_t dns_info;
+    esp_err_t err = esp_netif_get_dns_info(esp_netif_sta, ESP_NETIF_DNS_MAIN, &dns_info);
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "DNS IP: " IPSTR, IP2STR(&dns_info.ip.u_addr.ip4));
+    } else {
+        ESP_LOGE(TAG, "Failed to retrieve DNS info: %s", esp_err_to_name(err));
+    }
+
+    // Get default route (i.e., the default gateway)
+    esp_ip6_addr_t ip6_info;
+    if (esp_netif_get_ip6_linklocal(esp_netif_sta, &ip6_info) == ESP_OK) {
+        ESP_LOGI(TAG, "IPv6 Address: " IPV6STR, IPV62STR(ip6_info));
+    } else {
+        ESP_LOGE(TAG, "Failed to get IPv6 information");
+    }
 }

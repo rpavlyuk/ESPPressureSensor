@@ -12,6 +12,7 @@
 #include "sensor.h"
 #include "web.h"
 #include "mqtt.h"
+#include "zigbee.h"
 
 void app_main(void) {
     
@@ -19,7 +20,10 @@ void app_main(void) {
     ESP_ERROR_CHECK(nvs_init());
 
     // Init settings
-    ESP_ERROR_CHECK(settings_init()); 
+    ESP_ERROR_CHECK(settings_init());
+
+    // init internal filesystem
+    init_filesystem();
 
     /* Warm welcome in the console */
     char *device_id;
@@ -29,9 +33,6 @@ void app_main(void) {
     ESP_LOGI(TAG, "*** Starting ESP32-based Pressure Sonsor device ***");
     ESP_LOGI(TAG, "Device ID: %s", device_id);
     ESP_LOGI(TAG, "Device Serial: %s", device_serial);
-
-    // init internal filesystem
-    init_filesystem();
 
     // Initialize the default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -54,17 +55,25 @@ void app_main(void) {
     // Initialize and start Wi-Fi
     start_wifi(provisioned);
 
-    // start web
-    start_webserver();
+    if (provisioned) {
+        ESP_LOGI(TAG, "WiFi is provisioned!");
 
-    // start MQTT client
-    if (mqtt_init() == ESP_OK) {
-        ESP_LOGI(TAG, "Connected to MQTT server!");
-    } else {
-        ESP_LOGE(TAG, "Unable to connect to MQTT broker");
-        return;
+        // start web
+        start_webserver();
+
+        // start MQTT client
+        if (mqtt_init() == ESP_OK) {
+            ESP_LOGI(TAG, "Connected to MQTT server!");
+        } else {
+            ESP_LOGE(TAG, "Unable to connect to MQTT broker");
+            return;
+        }
+
+        // run zigbee
+        // ESP_ERROR_CHECK(zigbee_init());
+
+        // run the sensor
+        xTaskCreate(sensor_run, "sensor_task", 8192, NULL, 5, NULL);
     }
 
-    // run the sensor
-    sensor_run();
 }

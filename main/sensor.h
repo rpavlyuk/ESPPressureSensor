@@ -29,6 +29,6 @@ void sensor_adc_calibration_deinit(adc_cali_handle_t handle);
 int calculate_median(int* data, int size);
 float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_unit_handle_t adc1_handle, adc_channel_t channel, bool do_calibration1_pressure_sensor);
 
-void sensor_run();
+void sensor_run(void *pvParameters);
 
 #endif

@@ -10,7 +10,7 @@
     "idf.openOcdConfigs": [
         "board/esp32c6-builtin.cfg"
     ],
-    "idf.port": "/dev/tty.usbmodem11401",
+    "idf.port": "/dev/tty.usbmodem1101",
     "idf.pythonBinPath": "/Users/rpavlyuk/.espressif/python_env/idf5.4_py3.12_env/bin/python",
     "idf.toolsPath": "/Users/rpavlyuk/.espressif",
     "idf.flashType": "UART",

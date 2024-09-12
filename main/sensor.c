@@ -12,6 +12,7 @@
 #include "sensor.h"
 #include "settings.h"
 #include "mqtt.h"
+#include "zigbee.h"
 #include "non_volatile_storage.h"
 
 #define NUM_SAMPLES             50  // Number of samples to collect
@@ -90,7 +91,7 @@ void sensor_adc_calibration_deinit(adc_cali_handle_t handle)
 }
 
 
-void sensor_run() {
+void sensor_run(void *pvParameters) {
 
     // wait for the device to become ready
     ESP_LOGI(TAG, "Waiting for device to become ready");
@@ -159,13 +160,20 @@ void sensor_run() {
         ESP_LOGI(TAG, "Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.2f Pa", 
                  sensor_data.voltage_raw, sensor_data.voltage, sensor_data.pressure);
 
+        ESP_LOGI(TAG, "Sensor Run - Before MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
+
         // Publish the sensor data via MQTT
         mqtt_publish_sensor_data(&sensor_data);
+
+        // Publish via Zigbee
+        /* zigbee_update_sensor_data(sensor_data.pressure, sensor_data.voltage); */
+
+        ESP_LOGI(TAG, "Sensor Run - After MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
 
         vTaskDelay(pdMS_TO_TICKS(3000));  // Delay 1000 milliseconds
     }
 
-        //Tear Down
+    //Tear Down
     ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
     if (do_calibration1_pressure_sensor) {
         sensor_adc_calibration_deinit(adc1_cali_pressure_sensor_handle);
