@@ -9,7 +9,7 @@
 extern int device_ready;
 
 /**
- * General settings
+ * General variable settings
  */
 #define DEVICE_SERIAL_LENGTH    32
 #define DEVICE_ID_LENGTH        12
@@ -18,6 +18,29 @@ extern int device_ready;
 #define MQTT_USER_LENGTH         64
 #define MQTT_PASSWORD_LENGTH     64
 #define MQTT_PREFIX_LENGTH       128
+#define HA_PREFIX_LENGTH         128
+
+#define SENSOR_OFFSET_MIN    -5.0
+#define SENSOR_OFFSET_MAX    5.0
+
+#define SENSOR_READ_INTERVAL_MIN    1000
+#define SENSOR_READ_INTERVAL_MAX    60000
+
+#define SENSOR_SAMPLING_COUNT_MIN    1
+#define SENSOR_SAMPLING_COUNT_MAX    100
+
+#define SENSOR_SAMPLING_INTERVAL_MIN    1
+#define SENSOR_SAMPLING_INTERVAL_MAX    100
+
+#define SENSOR_SAMPLING_MEDIAN_DEVIATION_MIN    1
+#define SENSOR_SAMPLING_MEDIAN_DEVIATION_MAX    100
+
+
+#define SENSOR_LINEAR_MULTIPLIER_MIN    1
+#define SENSOR_LINEAR_MULTIPLIER_MAX    1000000
+
+#define HA_UPDATE_INTERVAL_MIN  60000           // Once a minute
+#define HA_UPDATE_INTERVAL_MAX  86400000        // Once a day (24 hr)
 
 /**
  * General constants
@@ -43,8 +66,17 @@ extern int device_ready;
 #define S_KEY_MQTT_PASSWORD     "mqtt_password"
 #define S_KEY_MQTT_PREFIX       "mqtt_prefix"
 
+#define S_KEY_HA_PREFIX                 "ha_prefix"
+#define S_KEY_HA_UPDATE_INTERVAL        "ha_upd_intervl"
+
 #define S_KEY_SENSOR_OFFSET             "sensor_offset"
 #define S_KEY_SENSOR_LINEAR_MULTIPLIER  "sensor_multipl"
+#define S_KEY_SENSOR_READ_INTERVAL      "sensor_intervl"
+
+#define S_KEY_SENSOR_SAMPLING_COUNT                "sensor_samples"
+#define S_KEY_SENSOR_SAMPLING_INTERVAL             "sensor_smp_int"
+#define S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION     "sensor_deviate"
+
 
 /**
  * Settings default values
@@ -59,8 +91,17 @@ extern int device_ready;
 #define S_DEFAULT_MQTT_PASSWORD     ""
 #define S_DEFAULT_MQTT_PREFIX       "pressure_sensor"
 
+#define S_DEFAULT_HA_PREFIX             "homeassistant"
+#define S_DEFAULT_HA_UPDATE_INTERVAL    600000              // Update Home Assistant definitions every 10 minutes
+
 #define S_DEFAULT_SENSOR_OFFSET               0.471
 #define S_DEFAULT_SENSOR_LINEAR_MULTIPLIER    250000
+#define S_DEFAULT_SENSOR_READ_INTERVAL        3000      // ms
+
+#define S_DEFAULT_SENSOR_SAMPLING_COUNT                 50  // Number of samples to collect per measurement
+#define S_DEFAULT_SENSOR_SAMPLING_INTERVAL              10  // Interval between samples in milliseconds
+#define S_DEFAULT_SENSOR_SAMPLING_MEDIAN_DEVIATION      10  // Threshold percentage for filtering
+
 
 /**
  * Routines

@@ -74,14 +74,14 @@ void esp_zb_app_signal_handler(esp_zb_app_signal_t *signal_struct)
     esp_zb_app_signal_type_t sig_type = *p_sg_p;
     switch (sig_type) {
     case ESP_ZB_ZDO_SIGNAL_SKIP_STARTUP:
-        ESP_LOGI(TAG, "Initialize Zigbee stack");
+        ESP_LOGI(TAG, "Initialize Zigbee stack by signal handler");
         esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_INITIALIZATION);
         break;
     case ESP_ZB_BDB_SIGNAL_DEVICE_FIRST_START:
     case ESP_ZB_BDB_SIGNAL_DEVICE_REBOOT:
         if (err_status == ESP_OK) {
             ESP_LOGI(TAG, "Deferred driver initialization %s", deferred_driver_init() ? "failed" : "successful");
-            ESP_LOGI(TAG, "Device started up in %s factory-reset mode", esp_zb_bdb_is_factory_new() ? "" : "non");
+            ESP_LOGI(TAG, "Device started up in %sfactory-reset mode", esp_zb_bdb_is_factory_new() ? "" : "non ");
             if (esp_zb_bdb_is_factory_new()) {
                 ESP_LOGI(TAG, "Start network steering");
                 esp_zb_bdb_start_top_level_commissioning(ESP_ZB_BDB_MODE_NETWORK_STEERING);
@@ -179,8 +179,11 @@ static void esp_zb_task(void *pvParameters)
     esp_zb_zcl_update_reporting_info(&reporting_info);
 
     esp_zb_set_primary_network_channel_set(ESP_ZB_PRIMARY_CHANNEL_MASK);
+
+    ESP_LOGI(TAG, "Calling Zigbee esp_zb_start(false)");
     ESP_ERROR_CHECK(esp_zb_start(false));
 
+    ESP_LOGI(TAG, "Starting Zigbee main stack loop esp_zb_stack_main_loop()");
     esp_zb_stack_main_loop();
 }
 

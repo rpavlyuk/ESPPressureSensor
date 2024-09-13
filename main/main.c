@@ -15,6 +15,8 @@
 #include "zigbee.h"
 
 void app_main(void) {
+
+    bool wifi_provisioned = false;
     
     // Initialize NVS
     ESP_ERROR_CHECK(nvs_init());
@@ -22,8 +24,11 @@ void app_main(void) {
     // Init settings
     ESP_ERROR_CHECK(settings_init());
 
-    // init internal filesystem
-    init_filesystem();
+    // enable filesystem needed for WEB server
+    if (_DEVICE_ENABLE_WEB) {
+        // init internal filesystem
+        init_filesystem();
+    }
 
     /* Warm welcome in the console */
     char *device_id;
@@ -37,40 +42,57 @@ void app_main(void) {
     // Initialize the default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    /* Initialize WIFI */
-    initialize_wifi();
+    if (_DEVICE_ENABLE_WIFI) {
+        ESP_LOGI(TAG, "WIFI ENABLED!");
 
-    // Initialize Wi-Fi provisioning manager
-    wifi_prov_mgr_config_t wifi_config = {
-        .scheme = wifi_prov_scheme_softap,
-        .scheme_event_handler = WIFI_PROV_EVENT_HANDLER_NONE
-    };
-    ESP_ERROR_CHECK(wifi_prov_mgr_init(wifi_config));
-    ESP_LOGI(TAG, "WiFi provisioning manager initialization complete");
+        /* Initialize WIFI */
+        initialize_wifi();
 
-    // Check if the device is already provisioned
-    bool provisioned = false;
-    ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
+        // Initialize Wi-Fi provisioning manager
+        wifi_prov_mgr_config_t wifi_config = {
+            .scheme = wifi_prov_scheme_softap,
+            .scheme_event_handler = WIFI_PROV_EVENT_HANDLER_NONE
+        };
+        ESP_ERROR_CHECK(wifi_prov_mgr_init(wifi_config));
+        ESP_LOGI(TAG, "WiFi provisioning manager initialization complete");
 
-    // Initialize and start Wi-Fi
-    start_wifi(provisioned);
+        // Check if the device is already provisioned
+        
+        ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&wifi_provisioned));
 
-    if (provisioned) {
+        // Initialize and start Wi-Fi
+        start_wifi(wifi_provisioned);
+    }
+
+    if (wifi_provisioned) {
         ESP_LOGI(TAG, "WiFi is provisioned!");
 
         // start web
-        start_webserver();
-
-        // start MQTT client
-        if (mqtt_init() == ESP_OK) {
-            ESP_LOGI(TAG, "Connected to MQTT server!");
-        } else {
-            ESP_LOGE(TAG, "Unable to connect to MQTT broker");
-            return;
+        if (_DEVICE_ENABLE_WEB) {
+            ESP_LOGI(TAG, "WEB ENABLED!");
+            start_webserver();
         }
 
-        // run zigbee
-        // ESP_ERROR_CHECK(zigbee_init());
+        // start MQTT client
+        if (_DEVICE_ENABLE_MQTT) {
+            ESP_LOGI(TAG, "MQTT ENABLED!");
+            if (mqtt_init() == ESP_OK) {
+                ESP_LOGI(TAG, "Connected to MQTT server!");
+            } else {
+                ESP_LOGE(TAG, "Unable to connect to MQTT broker");
+                return;
+            }
+        }
+
+        if (_DEVICE_ENABLE_ZIGBEE) {
+            ESP_LOGI(TAG, "Zigbee ENABLED!");
+            if (_DEVICE_ENABLE_WIFI) {
+                ESP_LOGW(TAG, "!!! Entering DANGER ZONE: Both WiFi and Zigbee are enabled !!!");
+                ESP_LOGW(TAG, "!!! --- DEVICE INSTABILITY RISK (!) --- !!!");
+            }
+            // run zigbee
+            ESP_ERROR_CHECK(zigbee_init());
+        }
 
         // run the sensor
         xTaskCreate(sensor_run, "sensor_task", 8192, NULL, 5, NULL);

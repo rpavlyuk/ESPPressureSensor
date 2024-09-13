@@ -160,6 +160,26 @@ esp_err_t settings_init() {
         is_dynamically_allocated = false;
     }
 
+    // Parameter: HomeAssistant MQTT Integration prefix
+    char *ha_prefix = NULL;
+    if (nvs_read_string(S_NAMESPACE, S_KEY_HA_PREFIX, &ha_prefix) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %s", S_KEY_HA_PREFIX, ha_prefix);
+        is_dynamically_allocated = true;
+    } else {
+        ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_HA_PREFIX);
+        ha_prefix = S_DEFAULT_HA_PREFIX;
+        if (nvs_write_string(S_NAMESPACE, S_KEY_HA_PREFIX, ha_prefix) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %s", S_KEY_HA_PREFIX, ha_prefix);
+        } else {
+            ESP_LOGE(TAG, "Failed creating key %s with value %s", S_KEY_HA_PREFIX, ha_prefix);
+            return ESP_FAIL;
+        }
+    }
+    if (is_dynamically_allocated) {
+        free(ha_prefix); // for string (char*) params only
+        is_dynamically_allocated = false;
+    }
+
     // Parameter: Device ID (actually, MAC)
     char device_id[DEVICE_ID_LENGTH + 1];
     if (nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id) == ESP_OK) {
@@ -199,6 +219,81 @@ esp_err_t settings_init() {
         }
     }
     // free(device_serial); // for string (char*) params only
+
+    // Parameter: Sensor read interval
+    uint16_t sensor_intervl;
+    if (nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %i", S_KEY_SENSOR_READ_INTERVAL, sensor_intervl);
+    } else {
+        ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_SENSOR_READ_INTERVAL);
+        sensor_intervl = S_DEFAULT_SENSOR_READ_INTERVAL;
+        if (nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, sensor_intervl) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %i", S_KEY_SENSOR_READ_INTERVAL, sensor_intervl);
+        } else {
+            ESP_LOGE(TAG, "Failed creating key %s with value %i", S_KEY_SENSOR_READ_INTERVAL, sensor_intervl);
+            return ESP_FAIL;
+        }
+    }
+
+    // Parameter: Number of samples to collect per measurement
+    uint16_t sensor_samples;
+    if (nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sensor_samples) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %i", S_KEY_SENSOR_SAMPLING_COUNT, sensor_samples);
+    } else {
+        ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_SENSOR_SAMPLING_COUNT);
+        sensor_samples = S_DEFAULT_SENSOR_SAMPLING_COUNT;
+        if (nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, sensor_samples) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %i", S_KEY_SENSOR_SAMPLING_COUNT, sensor_samples);
+        } else {
+            ESP_LOGE(TAG, "Failed creating key %s with value %i", S_KEY_SENSOR_SAMPLING_COUNT, sensor_samples);
+            return ESP_FAIL;
+        }
+    }
+
+    // Parameter: Interval between samples in milliseconds
+    uint16_t sensor_smp_int;
+    if (nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %i", S_KEY_SENSOR_SAMPLING_INTERVAL, sensor_smp_int);
+    } else {
+        ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_SENSOR_SAMPLING_INTERVAL);
+        sensor_smp_int = S_DEFAULT_SENSOR_SAMPLING_INTERVAL;
+        if (nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, sensor_smp_int) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %i", S_KEY_SENSOR_SAMPLING_INTERVAL, sensor_smp_int);
+        } else {
+            ESP_LOGE(TAG, "Failed creating key %s with value %i", S_KEY_SENSOR_SAMPLING_INTERVAL, sensor_smp_int);
+            return ESP_FAIL;
+        }
+    }
+
+    // Parameter: Threshold percentage for filtering
+    uint16_t sensor_deviate;
+    if (nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %i", S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, sensor_deviate);
+    } else {
+        ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION);
+        sensor_deviate = S_DEFAULT_SENSOR_SAMPLING_MEDIAN_DEVIATION;
+        if (nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, sensor_deviate) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %i", S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, sensor_deviate);
+        } else {
+            ESP_LOGE(TAG, "Failed creating key %s with value %i", S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, sensor_deviate);
+            return ESP_FAIL;
+        }
+    }
+
+    // Parameter: Update Home Assistant definitions every X minutes
+    uint32_t ha_upd_intervl;
+    if (nvs_read_uint32(S_NAMESPACE, S_KEY_HA_UPDATE_INTERVAL, &ha_upd_intervl) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %li", S_KEY_HA_UPDATE_INTERVAL, ha_upd_intervl);
+    } else {
+        ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_HA_UPDATE_INTERVAL);
+        ha_upd_intervl = S_DEFAULT_HA_UPDATE_INTERVAL;
+        if (nvs_write_uint32(S_NAMESPACE, S_KEY_HA_UPDATE_INTERVAL, ha_upd_intervl) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %li", S_KEY_HA_UPDATE_INTERVAL, ha_upd_intervl);
+        } else {
+            ESP_LOGE(TAG, "Failed creating key %s with value %li", S_KEY_HA_UPDATE_INTERVAL, ha_upd_intervl);
+            return ESP_FAIL;
+        }
+    }  
 
     // device ready
     device_ready = 1;

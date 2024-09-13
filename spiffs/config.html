@@ -18,8 +18,8 @@
     <div class="container">
         <header class="d-flex justify-content-center py-3">
             <ul class="nav nav-pills">
-            <li class="nav-item"><a href="/" class="nav-link">Configuration</a></li>
-            <li class="nav-item"><a href="#" class="nav-link">Status</a></li>
+            <li class="nav-item"><a href="/" class="nav-link active" aria-current="page">Configuration</a></li>
+            <li class="nav-item"><a href="/status" class="nav-link">Status</a></li>
             </ul>
         </header>
     </div>
@@ -41,9 +41,16 @@
             <tr><td>MQTT User:</td><td><input type="text" name="mqtt_user" value="{VAL_MQTT_USER}" size="32" maxlength="{LEN_MQTT_USER}"></td></tr>
             <tr><td>MQTT Password:</td><td><input type="password" name="mqtt_password" value="{VAL_MQTT_PASSWORD}" size="32" maxlength="{LEN_MQTT_PASSWORD}"></td></tr>
             <tr><td>MQTT Prefix:</td><td><input type="text" name="mqtt_prefix" value="{VAL_MQTT_PREFIX}" size="32" maxlength="{LEN_MQTT_PREFIX}"></td></tr>
+            <tr><td><b>HomeAssistant Integration</b></td><td></td></tr>
+            <tr><td>HomeAssistant Device integration MQTT Prefix:</td><td><input type="text" name="ha_prefix" value="{VAL_HA_PREFIX}" size="32" maxlength="{LEN_HA_PREFIX}"></td></tr>
+            <tr><td>HomeAssistant Device update interval (ms):</td><td><input type="number" step="500" name="ha_upd_intervl" value="{VAL_HA_UPDATE_INTERVAL}" min="{MIN_HA_UPDATE_INTERVAL}" max="{MAX_HA_UPDATE_INTERVAL}"/>  ({MIN_HA_UPDATE_INTERVAL} - {MAX_HA_UPDATE_INTERVAL})</td></tr>
             <tr><td><b>Sensor Parameters</b></td><td></td></tr>
-            <tr><td>Sensor Offset:</td><td><input type="number" step="0.001" name="sensor_offset" value="{VAL_SENSOR_OFFSET}"></td></tr>
-            <tr><td>Sensor Linear Multiplier:</td><td><input type="number" step="10" name="sensor_linear_multiplier" value="{VAL_SENSOR_LINEAR_MULTIPLIER}"></td></tr>
+            <tr><td>Sensing interval (ms):</td><td><input type="number" step="100" name="sensor_intervl" value="{VAL_SENSOR_READ_INTERVAL}" min="{MIN_SENSOR_READ_INTERVAL}" max="{MAX_SENSOR_READ_INTERVAL}"> ({MIN_SENSOR_READ_INTERVAL} - {MAX_SENSOR_READ_INTERVAL})</td></tr>
+            <tr><td>Sensor ADC Offset (V):</td><td><input type="number" step="0.001" name="sensor_offset" value="{VAL_SENSOR_OFFSET}" min="{MIN_SENSOR_OFFSET}" max="{MAX_SENSOR_OFFSET}"> ({MIN_SENSOR_OFFSET} - {MAX_SENSOR_OFFSET})</td></tr>
+            <tr><td>Sensor Linear Multiplier:</td><td><input type="number" step="10" name="sensor_multipl" value="{VAL_SENSOR_LINEAR_MULTIPLIER}" min="{MIN_SENSOR_LINEAR_MULTIPLIER}" max="{MAX_SENSOR_LINEAR_MULTIPLIER}"/> ({MIN_SENSOR_LINEAR_MULTIPLIER} - {MAX_SENSOR_LINEAR_MULTIPLIER})</td></tr>           
+            <tr><td>Number of samples to collect per measurement:</td><td><input type="number" step="1" name="sensor_samples" value="{VAL_SENSOR_SAMPLING_COUNT}" min="{MIN_SENSOR_SAMPLING_COUNT}" max="{MAX_SENSOR_SAMPLING_COUNT}"/> ({MIN_SENSOR_SAMPLING_COUNT} - {MAX_SENSOR_SAMPLING_COUNT})</td></tr>
+            <tr><td>Interval between samples (ms):</td><td><input type="number" step="1" name="sensor_smp_int" value="{VAL_SENSOR_SAMPLING_INTERVAL}" min="{MIN_SENSOR_SAMPLING_INTERVAL}" max="{MAX_SENSOR_SAMPLING_INTERVAL}"/> ({MIN_SENSOR_SAMPLING_INTERVAL} - {MAX_SENSOR_SAMPLING_INTERVAL})</td></tr>
+            <tr><td>Threshold for samples filtering (%):</td><td><input type="number" step="1" name="sensor_deviate" value="{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}" min="{MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION}" max="{MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION}"/> ({MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION} - {MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION})</td></tr>
         </table>
         <input type="submit" value="Save Settings">
     </form>
@@ -52,10 +59,6 @@
     <!-- Reboot button -->
     <form action="/reboot" method="POST">
         <input type="submit" value="Reboot Device">
-    </form>
-    <!-- Reboot button -->
-    <form action="/connect-zigbee" method="POST">
-        <input type="submit" value="Connect Zigbee">
     </form>
     </div>
 

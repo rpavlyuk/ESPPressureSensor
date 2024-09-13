@@ -126,7 +126,7 @@ void mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
     // Ensure MQTT client is initialized
     // NOTE: Not checking for connection as CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED is enabled
-#if !CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED
+// #if !CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED
     if (mqtt_client == NULL || !mqtt_connected) {
         ESP_LOGW(TAG, "MQTT client is not initialized or not connected. Trying to re-init...");
         if (mqtt_init() != ESP_OK) {
@@ -134,7 +134,7 @@ void mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
             return;
         }
     }
-#endif
+// #endif
 
     char *mqtt_server = (char *)malloc(MQTT_SERVER_LENGTH);
     char *mqtt_protocol = (char *)malloc(MQTT_PROTOCOL_LENGTH);

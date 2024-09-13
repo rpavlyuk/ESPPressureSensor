@@ -128,6 +128,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     char *mqtt_user = (char *)malloc(MQTT_USER_LENGTH);
     char *mqtt_password = (char *)malloc(MQTT_PASSWORD_LENGTH);
     char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
+    char *ha_prefix = (char *)malloc(HA_PREFIX_LENGTH);
     char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
     char *device_serial = (char *)malloc(DEVICE_SERIAL_LENGTH+1);
 
@@ -135,7 +136,15 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     float sensor_offset;
     uint32_t sensor_linear_multiplier;
 
-    if (!mqtt_server || !mqtt_protocol || !mqtt_user || !mqtt_password || !mqtt_prefix) {
+    uint32_t ha_upd_intervl;
+    uint16_t sensor_samples;
+    uint16_t sensor_smp_int;
+    uint16_t sensor_deviate;
+
+    uint16_t sensor_intervl;
+
+
+    if (!mqtt_server || !mqtt_protocol || !mqtt_user || !mqtt_password || !mqtt_prefix || !ha_prefix) {
         ESP_LOGE(TAG, "Memory allocation failed for NVS strings");
         free(html_template);
         free(html_output);
@@ -144,6 +153,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
         if (mqtt_user) free(mqtt_user);
         if (mqtt_password) free(mqtt_password);
         if (mqtt_prefix) free(mqtt_prefix);
+        if (ha_prefix) free(ha_prefix);
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -157,18 +167,34 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_USER, &mqtt_user));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PASSWORD, &mqtt_password));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_HA_PREFIX, &ha_prefix));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial));
+    ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_HA_UPDATE_INTERVAL, &ha_upd_intervl));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sensor_samples));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
 
     // Replace placeholders in the template with actual values
     char mqtt_port_str[6];
-    snprintf(mqtt_port_str, sizeof(mqtt_port_str), "%u", mqtt_port);
-
     char sensor_offset_str[10];
-    snprintf(sensor_offset_str, sizeof(sensor_offset_str), "%.3f", sensor_offset);
-
     char sensor_linear_multiplier_str[10];
+    char ha_upd_intervl_str[10];
+    char sensor_samples_str[10];
+    char sensor_smp_int_str[10];
+    char sensor_deviate_str[10];
+    char sensor_intervl_str[10];
+    snprintf(mqtt_port_str, sizeof(mqtt_port_str), "%u", mqtt_port);
+    snprintf(sensor_offset_str, sizeof(sensor_offset_str), "%.3f", sensor_offset);
     snprintf(sensor_linear_multiplier_str, sizeof(sensor_linear_multiplier_str), "%lu", sensor_linear_multiplier);
+    snprintf(ha_upd_intervl_str, sizeof(ha_upd_intervl_str), "%li", (uint32_t) ha_upd_intervl);
+    snprintf(sensor_samples_str, sizeof(sensor_samples_str), "%i", (uint16_t) sensor_samples);
+    snprintf(sensor_smp_int_str, sizeof(sensor_smp_int_str), "%i", (uint16_t) sensor_smp_int);
+    snprintf(sensor_deviate_str, sizeof(sensor_deviate_str), "%i", (uint16_t) sensor_deviate);
+    snprintf(sensor_intervl_str, sizeof(sensor_intervl_str), "%i", (uint16_t) sensor_intervl);
+
+
 
     replace_placeholder(html_output, "{VAL_DEVICE_ID}", device_id);
     replace_placeholder(html_output, "{VAL_DEVICE_SERIAL}", device_serial);
@@ -178,22 +204,18 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_MQTT_USER}", mqtt_user);
     replace_placeholder(html_output, "{VAL_MQTT_PASSWORD}", mqtt_password);
     replace_placeholder(html_output, "{VAL_MQTT_PREFIX}", mqtt_prefix);
+    replace_placeholder(html_output, "{VAL_HA_PREFIX}", ha_prefix);
     replace_placeholder(html_output, "{VAL_SENSOR_OFFSET}", sensor_offset_str);
     replace_placeholder(html_output, "{VAL_SENSOR_LINEAR_MULTIPLIER}", sensor_linear_multiplier_str);
     replace_placeholder(html_output, "{VAL_MESSAGE}", message);
+    replace_placeholder(html_output, "{VAL_HA_UPDATE_INTERVAL}", ha_upd_intervl_str);
+    replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_COUNT}", sensor_samples_str);
+    replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_INTERVAL}", sensor_smp_int_str);
+    replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}", sensor_deviate_str);
+    replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
 
-    // replace size fields
-    char f_len[10];
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_SERVER_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_SERVER}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PROTOCOL_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PROTOCOL}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_USER_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_USER}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PASSWORD_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PASSWORD}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PREFIX_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PREFIX}", f_len);
+    // replace static fields
+    assign_static_page_variables(html_output);
 
 
     // Send the final HTML response
@@ -208,13 +230,15 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     free(mqtt_user);
     free(mqtt_password);
     free(mqtt_prefix);
+    free(ha_prefix);
 
     return ESP_OK;
 }
 
 static esp_err_t submit_post_handler(httpd_req_t *req) {
     // Extract form data
-    char buf[256];
+    char buf[1024];
+    memset(buf, 0, sizeof(buf));  // Initialize the buffer with zeros to avoid any garbage
     int ret, remaining = req->content_len;
 
     while (remaining > 0) {
@@ -227,8 +251,11 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
         remaining -= ret;
     }
 
+    // See what we got from client
+    ESP_LOGI(TAG, "Received request: %s", buf);
+
     // empty message
-    const char* success_message = "Parameters saved successfully. A device reboot might be required for the setting to come into effect.";
+    const char* success_message = "<div class=\"alert alert-primary alert-dismissible fade show\" role=\"alert\"> Parameters saved successfully. A device reboot might be required for the setting to come into effect.<button type=\"button\" class=\"btn-close\" data-bs-dismiss=\"alert\" aria-label=\"Close\"></button></div>";
     
     // Allocate memory dynamically for template and output
     char *html_template = (char *)malloc(MAX_TEMPLATE_SIZE);
@@ -266,8 +293,14 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     char *mqtt_user = (char *)malloc(MQTT_USER_LENGTH);
     char *mqtt_password = (char *)malloc(MQTT_PASSWORD_LENGTH);
     char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
+    char *ha_prefix = (char *)malloc(HA_PREFIX_LENGTH);
 
     char mqtt_port_str[6], sensor_offset_str[10], sensor_linear_multiplier_str[10];
+    char ha_upd_intervl_str[10];
+    char sensor_samples_str[10];
+    char sensor_smp_int_str[10];
+    char sensor_deviate_str[10];
+    char sensor_intervl_str[10];
 
     // Extract parameters from the buffer
     extract_param_value(buf, "mqtt_server=", mqtt_server, MQTT_SERVER_LENGTH);
@@ -275,15 +308,27 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     extract_param_value(buf, "mqtt_user=", mqtt_user, MQTT_USER_LENGTH);
     extract_param_value(buf, "mqtt_password=", mqtt_password, MQTT_PASSWORD_LENGTH);
     extract_param_value(buf, "mqtt_prefix=", mqtt_prefix, MQTT_PREFIX_LENGTH);
+    extract_param_value(buf, "ha_prefix=", ha_prefix, HA_PREFIX_LENGTH);
     extract_param_value(buf, "mqtt_port=", mqtt_port_str, sizeof(mqtt_port_str));
     extract_param_value(buf, "sensor_offset=", sensor_offset_str, sizeof(sensor_offset_str));
-    extract_param_value(buf, "sensor_linear_multiplier=", sensor_linear_multiplier_str, sizeof(sensor_linear_multiplier_str));
+    extract_param_value(buf, "sensor_multipl=", sensor_linear_multiplier_str, sizeof(sensor_linear_multiplier_str));
+    extract_param_value(buf, "ha_upd_intervl=", ha_upd_intervl_str, sizeof(ha_upd_intervl_str));
+    extract_param_value(buf, "sensor_samples=", sensor_samples_str, sizeof(sensor_samples_str));
+    extract_param_value(buf, "sensor_smp_int=", sensor_smp_int_str, sizeof(sensor_smp_int_str));
+    extract_param_value(buf, "sensor_deviate=", sensor_deviate_str, sizeof(sensor_deviate_str));
+    extract_param_value(buf, "sensor_intervl=", sensor_intervl_str, sizeof(sensor_intervl_str));
 
 
     // Convert mqtt_port and sensor_offset to their respective types
     uint16_t mqtt_port = (uint16_t)atoi(mqtt_port_str);  // Convert to uint16_t
     uint32_t sensor_linear_multiplier = (uint32_t)atoi(sensor_linear_multiplier_str);
     float sensor_offset = strtof(sensor_offset_str, NULL);  // Convert to float
+    uint32_t ha_upd_intervl = (uint32_t)atoi(ha_upd_intervl_str);
+    uint16_t sensor_samples = (uint16_t)atoi(sensor_samples_str);
+    uint16_t sensor_smp_int = (uint16_t)atoi(sensor_smp_int_str);
+    uint16_t sensor_deviate = (uint16_t)atoi(sensor_deviate_str);
+    uint16_t sensor_intervl = (uint16_t)atoi(sensor_intervl_str);
+
 
     // Decode potentially URL-encoded parameters
     url_decode(mqtt_server);
@@ -291,6 +336,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     url_decode(mqtt_user);
     url_decode(mqtt_password);
     url_decode(mqtt_prefix);
+    url_decode(ha_prefix);
 
     // dump parameters for debugging pursposes
     ESP_LOGI(TAG, "Received setting parameters");
@@ -299,9 +345,15 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "mqtt_user: %s", mqtt_user);
     ESP_LOGI(TAG, "mqtt_password: %s", mqtt_password);
     ESP_LOGI(TAG, "mqtt_prefix: %s", mqtt_prefix);
+    ESP_LOGI(TAG, "ha_prefix: %s", ha_prefix);
     ESP_LOGI(TAG, "mqtt_port: %i", mqtt_port);
     ESP_LOGI(TAG, "sensor_offset: %f", sensor_offset);
-    ESP_LOGI(TAG, "sensor_offset: %lu", sensor_linear_multiplier);
+    ESP_LOGI(TAG, "sensor_linear_multiplier: %lu", sensor_linear_multiplier);
+    ESP_LOGI(TAG, "ha_upd_intervl: %li", ha_upd_intervl);
+    ESP_LOGI(TAG, "sensor_samples: %i", sensor_samples);
+    ESP_LOGI(TAG, "sensor_smp_int: %i", sensor_smp_int);
+    ESP_LOGI(TAG, "sensor_deviate: %i", sensor_deviate);
+    ESP_LOGI(TAG, "sensor_intervl: %i", sensor_intervl);
 
     // Save parsed values to NVS or apply them directly
     ESP_ERROR_CHECK(nvs_write_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, sensor_offset));
@@ -312,6 +364,12 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_write_string(S_NAMESPACE, S_KEY_MQTT_USER, mqtt_user));
     ESP_ERROR_CHECK(nvs_write_string(S_NAMESPACE, S_KEY_MQTT_PASSWORD, mqtt_password));
     ESP_ERROR_CHECK(nvs_write_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, mqtt_prefix));
+    ESP_ERROR_CHECK(nvs_write_string(S_NAMESPACE, S_KEY_HA_PREFIX, ha_prefix));
+    ESP_ERROR_CHECK(nvs_write_uint32(S_NAMESPACE, S_KEY_HA_UPDATE_INTERVAL, ha_upd_intervl));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, sensor_samples));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, sensor_smp_int));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, sensor_deviate));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, sensor_intervl));
 
     /** Load and display settings */
     char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
@@ -326,13 +384,24 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_USER, &mqtt_user));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PASSWORD, &mqtt_password));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_HA_PREFIX, &ha_prefix));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial));
+    ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_HA_UPDATE_INTERVAL, &ha_upd_intervl));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sensor_samples));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl)); 
 
     // Replace placeholders in the template with actual values
     snprintf(mqtt_port_str, sizeof(mqtt_port_str), "%u", mqtt_port);
     snprintf(sensor_offset_str, sizeof(sensor_offset_str), "%.3f", sensor_data.voltage_offset);
     snprintf(sensor_linear_multiplier_str, sizeof(sensor_linear_multiplier_str), "%lu", sensor_data.sensor_linear_multiplier);
+    snprintf(ha_upd_intervl_str, sizeof(ha_upd_intervl_str), "%li", (uint32_t) ha_upd_intervl);
+    snprintf(sensor_samples_str, sizeof(sensor_samples_str), "%i", (uint16_t) sensor_samples);
+    snprintf(sensor_smp_int_str, sizeof(sensor_smp_int_str), "%i", (uint16_t) sensor_smp_int);
+    snprintf(sensor_deviate_str, sizeof(sensor_deviate_str), "%i", (uint16_t) sensor_deviate);
+    snprintf(sensor_intervl_str, sizeof(sensor_intervl_str), "%i", (uint16_t) sensor_intervl);
 
     replace_placeholder(html_output, "{VAL_DEVICE_ID}", device_id);
     replace_placeholder(html_output, "{VAL_DEVICE_SERIAL}", device_serial);
@@ -342,22 +411,18 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_MQTT_USER}", mqtt_user);
     replace_placeholder(html_output, "{VAL_MQTT_PASSWORD}", mqtt_password);
     replace_placeholder(html_output, "{VAL_MQTT_PREFIX}", mqtt_prefix);
+    replace_placeholder(html_output, "{VAL_HA_PREFIX}", ha_prefix);
     replace_placeholder(html_output, "{VAL_SENSOR_OFFSET}", sensor_offset_str);
     replace_placeholder(html_output, "{VAL_SENSOR_LINEAR_MULTIPLIER}", sensor_linear_multiplier_str);
     replace_placeholder(html_output, "{VAL_MESSAGE}", success_message);
+    replace_placeholder(html_output, "{VAL_HA_UPDATE_INTERVAL}", ha_upd_intervl_str);
+    replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_COUNT}", sensor_samples_str);
+    replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_INTERVAL}", sensor_smp_int_str);
+    replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}", sensor_deviate_str);
+    replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
 
-    // replace size fields
-    char f_len[10];
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_SERVER_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_SERVER}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PROTOCOL_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PROTOCOL}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_USER_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_USER}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PASSWORD_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PASSWORD}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PREFIX_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PREFIX}", f_len);
+    // replace static fields
+    assign_static_page_variables(html_output);
 
     // Send the final HTML response
     httpd_resp_set_type(req, "text/html");
@@ -371,8 +436,63 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     free(mqtt_user);
     free(mqtt_password);
     free(mqtt_prefix);
+    free(ha_prefix);
 
     return ESP_OK;
+}
+
+// Helper function to fill in the static variables in the template
+void assign_static_page_variables(char *html_output) {
+
+    // replace size fields
+    char f_len[10];
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_SERVER_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_SERVER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PROTOCOL_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PROTOCOL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_USER_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_USER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PASSWORD_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PASSWORD}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PREFIX_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PREFIX}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", HA_PREFIX_LENGTH);
+    replace_placeholder(html_output, "{LEN_HA_PREFIX}", f_len);
+    
+    snprintf(f_len, sizeof(f_len), "%li", (long int) HA_UPDATE_INTERVAL_MIN);
+    replace_placeholder(html_output, "{MIN_HA_UPDATE_INTERVAL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%li", (long int) HA_UPDATE_INTERVAL_MAX);
+    replace_placeholder(html_output, "{MAX_HA_UPDATE_INTERVAL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%.3f", SENSOR_OFFSET_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_OFFSET}", f_len);
+    snprintf(f_len, sizeof(f_len), "%.3f", SENSOR_OFFSET_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_OFFSET}", f_len);
+
+    snprintf(f_len, sizeof(f_len), "%li", (long int) SENSOR_LINEAR_MULTIPLIER_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_LINEAR_MULTIPLIER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%li", (long int) SENSOR_LINEAR_MULTIPLIER_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_LINEAR_MULTIPLIER}", f_len);
+
+
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_COUNT_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_COUNT}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_COUNT_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_COUNT}", f_len);
+
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_INTERVAL_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_INTERVAL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_INTERVAL_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_INTERVAL}", f_len);
+
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_MEDIAN_DEVIATION_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_MEDIAN_DEVIATION_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION}", f_len);  
+
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_READ_INTERVAL_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_READ_INTERVAL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_READ_INTERVAL_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_READ_INTERVAL}", f_len); 
 }
 
 // Helper function to replace placeholders in the template

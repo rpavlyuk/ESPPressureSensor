@@ -15,14 +15,6 @@
 #include "zigbee.h"
 #include "non_volatile_storage.h"
 
-#define NUM_SAMPLES             50  // Number of samples to collect
-#define SAMPLE_INTERVAL_MS      10  // Interval between samples in milliseconds
-#define THRESHOLD_PERCENTAGE    10  // Threshold percentage for filtering
-
-int samples[NUM_SAMPLES];
-float filtered_samples[NUM_SAMPLES];
-int num_filtered_samples = 0;
-
 sensor_data_t sensor_data;
 
 /*---------------------------------------------------------------
@@ -129,23 +121,11 @@ void sensor_run(void *pvParameters) {
     adc_cali_handle_t adc1_cali_pressure_sensor_handle = NULL;
     bool do_calibration1_pressure_sensor = sensor_adc_calibration_init(ADC_UNIT_1, PRESSURE_SENSOR_PIN, ADC_ATTEN, &adc1_cali_pressure_sensor_handle);
     
-    // adc1_config_width(ADC_WIDTH);
-    // adc1_config_channel_atten(PRESSURE_SENSOR_PIN, ADC_ATTEN);
 
-    ESP_LOGI(TAG, "/** Water pressure sensor demo **/");
+    ESP_LOGI(TAG, "Starting pressure sensing cycle");
 
     while (1) {
-        /*
-        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, PRESSURE_SENSOR_PIN, &adc_raw[0][0]));
-
-        // ESP_LOGI(TAG, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, PRESSURE_SENSOR_PIN, adc_raw[0][0]);
-        if (do_calibration1_pressure_sensor) {
-            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_pressure_sensor_handle, adc_raw[0][0], &voltage[0][0]));
-            // ESP_LOGI(TAG, "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, PRESSURE_SENSOR_PIN, voltage[0][0]);
-        }
-        */
         // Read the raw sensor value from ADC
-        // int raw_adc_value = adc_raw[0][0];
         sensor_data.voltage_raw = perform_smart_sampling(adc1_cali_pressure_sensor_handle, adc1_handle, PRESSURE_SENSOR_PIN, do_calibration1_pressure_sensor);
 
         // Obtain the voltage in Volts
@@ -153,24 +133,26 @@ void sensor_run(void *pvParameters) {
 
         // Calculate pressure in KPa using the provided formula
         ESP_ERROR_CHECK(nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_data.voltage_offset));
-        ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, &sensor_data.sensor_linear_multiplier));;
+        ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, &sensor_data.sensor_linear_multiplier));
         sensor_data.pressure = (sensor_data.voltage - sensor_data.voltage_offset) * sensor_data.sensor_linear_multiplier;  // Convert voltage to pressure in Pa
 
         // Print voltage and pressure to Serial Monitor
         ESP_LOGI(TAG, "Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.2f Pa", 
                  sensor_data.voltage_raw, sensor_data.voltage, sensor_data.pressure);
 
-        ESP_LOGI(TAG, "Sensor Run - Before MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
+        if (_DEVICE_ENABLE_MQTT) {
+            ESP_LOGI(TAG, "Sensor Run - Before MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
 
-        // Publish the sensor data via MQTT
-        mqtt_publish_sensor_data(&sensor_data);
+            // Publish the sensor data via MQTT
+            mqtt_publish_sensor_data(&sensor_data);
 
-        // Publish via Zigbee
-        /* zigbee_update_sensor_data(sensor_data.pressure, sensor_data.voltage); */
+            ESP_LOGI(TAG, "Sensor Run - After MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
+        }
 
-        ESP_LOGI(TAG, "Sensor Run - After MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
-
-        vTaskDelay(pdMS_TO_TICKS(3000));  // Delay 1000 milliseconds
+        uint16_t sensor_intervl = S_DEFAULT_SENSOR_READ_INTERVAL;
+        ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
+        ESP_LOGI(TAG, "Next pressure measurement cycle will start in %i seconds", (int) sensor_intervl / 1000);
+        vTaskDelay(pdMS_TO_TICKS(sensor_intervl));
     }
 
     //Tear Down
@@ -206,28 +188,36 @@ float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_uni
     int adc_raw;
     int voltage_mv;
     float average_voltage = 0.0;
+    uint16_t sensor_samples = (uint16_t) S_DEFAULT_SENSOR_SAMPLING_COUNT;
+    uint16_t sensor_smp_int = (uint16_t) S_DEFAULT_SENSOR_SAMPLING_INTERVAL;
+    uint16_t sensor_deviate = (uint16_t) S_DEFAULT_SENSOR_SAMPLING_MEDIAN_DEVIATION;
+
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sensor_samples));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
+
+    int samples[sensor_samples];
+    float filtered_samples[sensor_smp_int];
+    int num_filtered_samples = 0;
 
     // Collect NUM_SAMPLES samples every SAMPLE_INTERVAL_MS
-    // ESP_LOGI(TAG, "Starting to collect samples");
-    for (int i = 0; i < NUM_SAMPLES; i++) {
+    for (int i = 0; i < sensor_samples; i++) {
         ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, channel, &adc_raw));
-        // ESP_LOGI(TAG, "ADC%d Channel[%d] Raw Data: %d", ADC_UNIT_1 + 1, channel, adc_raw);
         if (do_calibration1_pressure_sensor) {
             ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_handle, adc_raw, &voltage_mv));
-            // ESP_LOGI(TAG, "ADC%d Channel[%d] Cali Voltage: %d mV", ADC_UNIT_1 + 1, channel, voltage_mv);
         }
         samples[i] = voltage_mv;
-        vTaskDelay(pdMS_TO_TICKS(SAMPLE_INTERVAL_MS));
+        vTaskDelay(pdMS_TO_TICKS(sensor_smp_int));
     }
 
     // Calculate the median of the collected samples
-    int median = calculate_median(samples, NUM_SAMPLES);
+    int median = calculate_median(samples, (int)sensor_samples);
 
     // Filter samples that differ from the median by more than the threshold percentage
     num_filtered_samples = 0;
-    for (int i = 0; i < NUM_SAMPLES; i++) {
+    for (int i = 0; i < (int)sensor_samples; i++) {
         float deviation = fabs((float)(samples[i] - median) / median * 100);
-        if (deviation <= THRESHOLD_PERCENTAGE) {
+        if (deviation <= sensor_deviate) {
             filtered_samples[num_filtered_samples++] = samples[i];
         }
     }
