@@ -2,6 +2,7 @@
 #define SETTINGS_H
 
 #include "common.h"
+#include "mqtt.h"
 
 /**
  * Initialization variables
@@ -59,6 +60,7 @@ extern int device_ready;
 #define S_KEY_DEVICE_ID         "device_id"
 #define S_KEY_DEVICE_SERIAL     "device_serial"
 
+#define S_KEY_MQTT_CONNECT      "mqtt_connect"       
 #define S_KEY_MQTT_SERVER       "mqtt_server"
 #define S_KEY_MQTT_PORT         "mqtt_port"
 #define S_KEY_MQTT_PROTOCOL     "mqtt_protocol"
@@ -84,6 +86,7 @@ extern int device_ready;
 #define S_DEFAULT_DEVICE_ID         ""
 #define S_DEFAULT_DEVICE_SERIAL     ""
 
+#define S_DEFAULT_MQTT_CONNECT      MQTT_SENSOR_MODE_DISABLE
 #define S_DEFAULT_MQTT_SERVER       "127.0.0.1"
 #define S_DEFAULT_MQTT_PORT         1883
 #define S_DEFAULT_MQTT_PROTOCOL     "mqtt"

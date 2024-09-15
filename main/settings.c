@@ -45,6 +45,21 @@ esp_err_t settings_init() {
         }
     }
 
+    // Parameter: MQTT connection mode
+    mqtt_connection_mode_t mqtt_connection_mode;
+    if (nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %i", S_KEY_MQTT_CONNECT, mqtt_connection_mode);
+    } else {
+        ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_MQTT_CONNECT);
+        mqtt_connection_mode = S_DEFAULT_MQTT_CONNECT;
+        if (nvs_write_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, mqtt_connection_mode) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %i", S_KEY_MQTT_CONNECT, mqtt_connection_mode);
+        } else {
+            ESP_LOGE(TAG, "Failed creating key %s with value %i", S_KEY_MQTT_CONNECT, mqtt_connection_mode);
+            return ESP_FAIL;
+        }
+    }  
+
     // Parameter: MQTT server
     char *mqtt_server = NULL;
     if (nvs_read_string(S_NAMESPACE, S_KEY_MQTT_SERVER, &mqtt_server) == ESP_OK) {

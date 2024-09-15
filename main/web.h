@@ -3,7 +3,7 @@
 
 #include "esp_http_server.h"
 
-#define MAX_TEMPLATE_SIZE       8192
+#define MAX_TEMPLATE_SIZE       16384
 
 /// @brief Initiate the SPIFFS
 void init_filesystem();

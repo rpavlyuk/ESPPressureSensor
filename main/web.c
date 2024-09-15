@@ -132,6 +132,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
     char *device_serial = (char *)malloc(DEVICE_SERIAL_LENGTH+1);
 
+    uint16_t mqtt_connect;
     uint16_t mqtt_port;
     float sensor_offset;
     uint32_t sensor_linear_multiplier;
@@ -175,6 +176,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
 
     // Replace placeholders in the template with actual values
     char mqtt_port_str[6];
@@ -185,6 +187,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     char sensor_smp_int_str[10];
     char sensor_deviate_str[10];
     char sensor_intervl_str[10];
+    char mqtt_connect_str[10];
     snprintf(mqtt_port_str, sizeof(mqtt_port_str), "%u", mqtt_port);
     snprintf(sensor_offset_str, sizeof(sensor_offset_str), "%.3f", sensor_offset);
     snprintf(sensor_linear_multiplier_str, sizeof(sensor_linear_multiplier_str), "%lu", sensor_linear_multiplier);
@@ -193,8 +196,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     snprintf(sensor_smp_int_str, sizeof(sensor_smp_int_str), "%i", (uint16_t) sensor_smp_int);
     snprintf(sensor_deviate_str, sizeof(sensor_deviate_str), "%i", (uint16_t) sensor_deviate);
     snprintf(sensor_intervl_str, sizeof(sensor_intervl_str), "%i", (uint16_t) sensor_intervl);
-
-
+    snprintf(mqtt_connect_str, sizeof(mqtt_connect_str), "%i", (uint16_t) mqtt_connect);
 
     replace_placeholder(html_output, "{VAL_DEVICE_ID}", device_id);
     replace_placeholder(html_output, "{VAL_DEVICE_SERIAL}", device_serial);
@@ -213,6 +215,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_INTERVAL}", sensor_smp_int_str);
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}", sensor_deviate_str);
     replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
+    replace_placeholder(html_output, "{VAL_MQTT_CONNECT}", mqtt_connect_str);
 
     // replace static fields
     assign_static_page_variables(html_output);
@@ -231,6 +234,8 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     free(mqtt_password);
     free(mqtt_prefix);
     free(ha_prefix);
+    free(device_id);
+    free(device_serial);
 
     return ESP_OK;
 }
@@ -301,6 +306,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     char sensor_smp_int_str[10];
     char sensor_deviate_str[10];
     char sensor_intervl_str[10];
+    char mqtt_connect_str[10];
 
     // Extract parameters from the buffer
     extract_param_value(buf, "mqtt_server=", mqtt_server, MQTT_SERVER_LENGTH);
@@ -317,6 +323,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     extract_param_value(buf, "sensor_smp_int=", sensor_smp_int_str, sizeof(sensor_smp_int_str));
     extract_param_value(buf, "sensor_deviate=", sensor_deviate_str, sizeof(sensor_deviate_str));
     extract_param_value(buf, "sensor_intervl=", sensor_intervl_str, sizeof(sensor_intervl_str));
+    extract_param_value(buf, "mqtt_connect=", mqtt_connect_str, sizeof(mqtt_connect_str));
 
 
     // Convert mqtt_port and sensor_offset to their respective types
@@ -328,7 +335,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     uint16_t sensor_smp_int = (uint16_t)atoi(sensor_smp_int_str);
     uint16_t sensor_deviate = (uint16_t)atoi(sensor_deviate_str);
     uint16_t sensor_intervl = (uint16_t)atoi(sensor_intervl_str);
-
+    uint16_t mqtt_connect = (uint16_t)atoi(mqtt_connect_str);
 
     // Decode potentially URL-encoded parameters
     url_decode(mqtt_server);
@@ -354,6 +361,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "sensor_smp_int: %i", sensor_smp_int);
     ESP_LOGI(TAG, "sensor_deviate: %i", sensor_deviate);
     ESP_LOGI(TAG, "sensor_intervl: %i", sensor_intervl);
+    ESP_LOGI(TAG, "mqtt_connect: %i", mqtt_connect);
 
     // Save parsed values to NVS or apply them directly
     ESP_ERROR_CHECK(nvs_write_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, sensor_offset));
@@ -370,6 +378,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, sensor_smp_int));
     ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, sensor_deviate));
     ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, sensor_intervl));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, mqtt_connect));
 
     /** Load and display settings */
     char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
@@ -391,7 +400,8 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sensor_samples));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl)); 
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
 
     // Replace placeholders in the template with actual values
     snprintf(mqtt_port_str, sizeof(mqtt_port_str), "%u", mqtt_port);
@@ -402,6 +412,9 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     snprintf(sensor_smp_int_str, sizeof(sensor_smp_int_str), "%i", (uint16_t) sensor_smp_int);
     snprintf(sensor_deviate_str, sizeof(sensor_deviate_str), "%i", (uint16_t) sensor_deviate);
     snprintf(sensor_intervl_str, sizeof(sensor_intervl_str), "%i", (uint16_t) sensor_intervl);
+    snprintf(mqtt_connect_str, sizeof(mqtt_connect_str), "%i", (uint16_t) mqtt_connect);
+
+    // ESP_LOGI(TAG, "Current HTML output size: %i, MAX_TEMPLATE_SIZE: %i", sizeof(html_output), MAX_TEMPLATE_SIZE);
 
     replace_placeholder(html_output, "{VAL_DEVICE_ID}", device_id);
     replace_placeholder(html_output, "{VAL_DEVICE_SERIAL}", device_serial);
@@ -420,9 +433,12 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_INTERVAL}", sensor_smp_int_str);
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}", sensor_deviate_str);
     replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
+    replace_placeholder(html_output, "{VAL_MQTT_CONNECT}", mqtt_connect_str);
 
     // replace static fields
     assign_static_page_variables(html_output);
+
+    // ESP_LOGI(TAG, "Final HTML output size: %i, MAX_TEMPLATE_SIZE: %i", sizeof(html_output), MAX_TEMPLATE_SIZE);
 
     // Send the final HTML response
     httpd_resp_set_type(req, "text/html");
@@ -437,6 +453,8 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     free(mqtt_password);
     free(mqtt_prefix);
     free(ha_prefix);
+    free(device_id);
+    free(device_serial);
 
     return ESP_OK;
 }

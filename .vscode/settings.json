@@ -10,7 +10,7 @@
     "idf.openOcdConfigs": [
         "board/esp32c6-builtin.cfg"
     ],
-    "idf.port": "/dev/tty.usbmodem1101",
+    "idf.port": "/dev/tty.usbmodem1401",
     "idf.pythonBinPath": "/Users/rpavlyuk/.espressif/python_env/idf5.4_py3.12_env/bin/python",
     "idf.toolsPath": "/Users/rpavlyuk/.espressif",
     "idf.flashType": "UART",
@@ -19,6 +19,7 @@
         "adc_oneshot.h": "c",
         "scheme_softap.h": "c",
         "esp_system.h": "c",
-        "non_volatile_storage.h": "c"
+        "non_volatile_storage.h": "c",
+        "esp_event.h": "c"
     }
 }

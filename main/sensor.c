@@ -140,7 +140,9 @@ void sensor_run(void *pvParameters) {
         ESP_LOGI(TAG, "Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.2f Pa", 
                  sensor_data.voltage_raw, sensor_data.voltage, sensor_data.pressure);
 
-        if (_DEVICE_ENABLE_MQTT) {
+        uint16_t mqtt_connection_mode;
+        ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
+        if (mqtt_connection_mode != (uint16_t)MQTT_SENSOR_MODE_DISABLE) {
             ESP_LOGI(TAG, "Sensor Run - Before MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
 
             // Publish the sensor data via MQTT

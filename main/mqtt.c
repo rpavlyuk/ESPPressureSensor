@@ -4,6 +4,7 @@
 #include "nvs_flash.h"
 #include "non_volatile_storage.h"
 #include "mqtt_client.h"
+#include "esp_check.h"
 
 #include "settings.h"
 #include "wifi.h"
@@ -45,6 +46,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
         mqtt_connected = false;  // Reset flag when disconnected
+        cleanup_mqtt();  // Ensure proper cleanup on disconnection
         break;
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGD(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
@@ -79,6 +81,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 // Function to initialize the MQTT client
 esp_err_t mqtt_init(void) {
     
+    uint16_t mqtt_connection_mode;
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
+    if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+        ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
+        return ESP_OK; // not an issue
+    }
+
     // wait for Wi-Fi to connect
     while(!g_wifi_ready) {
         ESP_LOGI(TAG, "Waiting for Wi-Fi/network to become ready...");
@@ -116,6 +125,13 @@ esp_err_t mqtt_init(void) {
         mqtt_cfg.credentials.authentication.password = mqtt_password;
     }
 
+    free(mqtt_server);
+    free(mqtt_protocol);
+    free(mqtt_user);
+    free(mqtt_password);
+    free(mqtt_prefix);
+    free(device_id);
+
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     return esp_mqtt_client_start(mqtt_client);
@@ -124,41 +140,49 @@ esp_err_t mqtt_init(void) {
 // Function to publish sensor data
 void mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
+    uint16_t mqtt_connection_mode;
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
+    if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+        ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
+        return;
+    }
+
     // Ensure MQTT client is initialized
     // NOTE: Not checking for connection as CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED is enabled
 // #if !CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED
     if (mqtt_client == NULL || !mqtt_connected) {
-        ESP_LOGW(TAG, "MQTT client is not initialized or not connected. Trying to re-init...");
-        if (mqtt_init() != ESP_OK) {
-            ESP_LOGE(TAG, "MQTT client re-init failed. Will not publish any data to MQTT.");
+        ESP_LOGW(TAG, "MQTT client is not initialized or not connected.");
+        if (mqtt_connection_mode > (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+            ESP_LOGI(TAG, "Restoring connection to MQTT...");
+            if (mqtt_init() != ESP_OK) {
+                ESP_LOGE(TAG, "MQTT client re-init failed. Will not publish any data to MQTT.");
+                return;
+            }
+        } else {
+            ESP_LOGW(TAG, "Re-connect disable by MQTT mode setting. Visit device WEB interface to adjust it.");
             return;
+        }
+    } else {
+        if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+            ESP_LOGW(TAG, "MQTT client is active, but MQTT mode set to DISABLED.");
         }
     }
 // #endif
 
-    char *mqtt_server = (char *)malloc(MQTT_SERVER_LENGTH);
-    char *mqtt_protocol = (char *)malloc(MQTT_PROTOCOL_LENGTH);
-    char *mqtt_user = (char *)malloc(MQTT_USER_LENGTH);
-    char *mqtt_password = (char *)malloc(MQTT_PASSWORD_LENGTH);
     char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
     char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
     uint16_t mqtt_port;
 
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_SERVER, &mqtt_server));
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_PORT, &mqtt_port));
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PROTOCOL, &mqtt_protocol));
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_USER, &mqtt_user));
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PASSWORD, &mqtt_password));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
 
     // Create MQTT topics based on mqtt_prefix and device_id
     char topic_voltage[256], topic_voltage_raw[256], topic_voltage_offset[256], topic_pressure[256], topic_multiplier[256];
-    snprintf(topic_voltage, sizeof(topic_voltage), "%s/%s/voltage", mqtt_prefix, device_id);
-    snprintf(topic_voltage_raw, sizeof(topic_voltage_raw), "%s/%s/voltage_raw", mqtt_prefix, device_id);
-    snprintf(topic_voltage_offset, sizeof(topic_voltage_offset), "%s/%s/voltage_offset", mqtt_prefix, device_id);
-    snprintf(topic_pressure, sizeof(topic_pressure), "%s/%s/pressure", mqtt_prefix, device_id);
-    snprintf(topic_multiplier, sizeof(topic_multiplier), "%s/%s/multiplier", mqtt_prefix, device_id);
+    snprintf(topic_voltage, sizeof(topic_voltage), "%s/%s/sensor/voltage", mqtt_prefix, device_id);
+    snprintf(topic_voltage_raw, sizeof(topic_voltage_raw), "%s/%s/sensor/voltage_raw", mqtt_prefix, device_id);
+    snprintf(topic_voltage_offset, sizeof(topic_voltage_offset), "%s/%s/sensor/voltage_offset", mqtt_prefix, device_id);
+    snprintf(topic_pressure, sizeof(topic_pressure), "%s/%s/sensor/pressure", mqtt_prefix, device_id);
+    snprintf(topic_multiplier, sizeof(topic_multiplier), "%s/%s/sensor/multiplier", mqtt_prefix, device_id);
 
     // Publish each sensor data field separately
     int msg_id;
@@ -210,5 +234,17 @@ void mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     } else {
         ESP_LOGI(TAG, "MQTT sensor data published successfully.");
     }
-    
+
+    free(mqtt_prefix);
+    free(device_id);   
+}
+
+// Call this function when you are shutting down the application or no longer need the MQTT client
+void cleanup_mqtt() {
+    if (mqtt_client) {
+        mqtt_connected = false;
+        ESP_RETURN_VOID_ON_ERROR(esp_mqtt_client_stop(mqtt_client), TAG, "Failed to stop the MQTT client");
+        ESP_RETURN_VOID_ON_ERROR(esp_mqtt_client_destroy(mqtt_client), TAG, "Failed to destroy the MQTT client");  // Free the resources
+        mqtt_client = NULL;
+    }
 }

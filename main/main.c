@@ -13,6 +13,7 @@
 #include "web.h"
 #include "mqtt.h"
 #include "zigbee.h"
+#include "status.h"
 
 void app_main(void) {
 
@@ -38,6 +39,10 @@ void app_main(void) {
     ESP_LOGI(TAG, "*** Starting ESP32-based Pressure Sonsor device ***");
     ESP_LOGI(TAG, "Device ID: %s", device_id);
     ESP_LOGI(TAG, "Device Serial: %s", device_serial);
+
+    // Free allocated memory after usage
+    free(device_id);
+    free(device_serial);
 
     // Initialize the default event loop
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -73,8 +78,11 @@ void app_main(void) {
             start_webserver();
         }
 
+        uint16_t mqtt_connection_mode;
+        ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
+
         // start MQTT client
-        if (_DEVICE_ENABLE_MQTT) {
+        if (_DEVICE_ENABLE_MQTT && mqtt_connection_mode) {
             ESP_LOGI(TAG, "MQTT ENABLED!");
             if (mqtt_init() == ESP_OK) {
                 ESP_LOGI(TAG, "Connected to MQTT server!");
@@ -97,5 +105,11 @@ void app_main(void) {
         // run the sensor
         xTaskCreate(sensor_run, "sensor_task", 8192, NULL, 5, NULL);
     }
+    if (_DEVICE_ENABLE_STATUS) {
+        ESP_LOGI(TAG, "Status ENABLED!");
+        // Start the status monitoring task 
+        status_init();
+    }
+
 
 }

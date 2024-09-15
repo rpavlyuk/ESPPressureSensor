@@ -7,6 +7,9 @@ project(ESPZPressureSensor)
 
 # Set the target
 set(IDF_TARGET "esp32c6")
+set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_C_FLAGS_DEBUG "-O0 -g")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 
 # SPIFFS flash
 # create SPIFF partition

@@ -30,6 +30,14 @@
     <form action="/submit" method="POST">
         <table border="0">
             <tr><td><b>MQTT</b></td><td></td></tr>
+            <tr><td><label for="mqtt_connect">MQTT Mode:</label></td>
+              <td>
+                <select name="mqtt_connect" id="mqtt_connect">
+                  <option value="0">Disabled</option>
+                  <option value="1">Connect Once (No reconnect)</option>
+                  <option value="2">Auto-Connect</option>
+                </select>
+              </td></tr>
             <tr><td>MQTT Server:</td>
                 <td><input type="text" name="mqtt_server" value="{VAL_MQTT_SERVER}" size="32" maxlength="{LEN_MQTT_SERVER}" 
                     pattern="^(([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}|((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))$" 
@@ -85,6 +93,13 @@
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <script>
+      function selectElement(id, valueToSelect) {    
+      let element = document.getElementById(id);
+        element.value = valueToSelect;
+      }
 
+      selectElement('mqtt_connect', '{VAL_MQTT_CONNECT}');
+    </script>
 </body>
 </html>
