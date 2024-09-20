@@ -90,6 +90,12 @@ void app_main(void) {
                 ESP_LOGE(TAG, "Unable to connect to MQTT broker");
                 return;
             }
+
+            // _DEVICE_ENABLE_HA
+            if (_DEVICE_ENABLE_HA) {
+                ESP_LOGI(TAG, "HA device status ENABLED!");
+                xTaskCreate(mqtt_device_config_task, "mqtt_device_config_task", 4096, NULL, 5, NULL);
+            }
         }
 
         if (_DEVICE_ENABLE_ZIGBEE) {

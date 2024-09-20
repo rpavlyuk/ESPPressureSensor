@@ -34,12 +34,14 @@ void status_task(void *pvParameters) {
             ESP_LOGI(STATUS_TAG, "No heap corruption detected");
         }
 
+        /* DISABLE -- causes crash
         // Dump heap trace after some time (e.g., every 3 heap monitor cycles)
         if (cycle > period && heap_trace_stop() == ESP_OK) {
             ESP_LOGI(TAG, "Heap trace stopped. Dumping results...");
             heap_trace_dump();  // Dump the trace logs to check for leaks
             heap_trace_start(HEAP_TRACE_LEAKS);  // Restart heap trace after dump
         }
+        */
 
 
         // Delay for a period (e.g., 10 seconds)

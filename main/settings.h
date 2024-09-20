@@ -48,6 +48,8 @@ extern int device_ready;
  */
 #define S_NAMESPACE         "settings"
 
+#define S_DEVICE_FAMILY       "sensor"
+
 /**
  * Settings keys
  * 

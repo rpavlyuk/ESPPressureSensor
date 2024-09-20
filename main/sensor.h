@@ -22,7 +22,7 @@ typedef struct {
 
 extern sensor_data_t sensor_data;
 
-
+sensor_data_t get_sensor_data();
 bool sensor_adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle);
 void sensor_adc_calibration_deinit(adc_cali_handle_t handle);
 

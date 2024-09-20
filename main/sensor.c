@@ -17,6 +17,21 @@
 
 sensor_data_t sensor_data;
 
+
+/**
+ * @brief: Create a copy of global sensor_data variable
+ */
+sensor_data_t get_sensor_data() {
+    sensor_data_t s_data = {
+        .pressure = sensor_data.pressure,
+        .sensor_linear_multiplier = sensor_data.sensor_linear_multiplier,
+        .voltage = sensor_data.voltage,
+        .voltage_offset = sensor_data.voltage_offset,
+        .voltage_raw = sensor_data.voltage_raw,
+    };
+
+    return s_data;
+}
 /*---------------------------------------------------------------
         ADC Calibration
 ---------------------------------------------------------------*/
@@ -121,6 +136,9 @@ void sensor_run(void *pvParameters) {
     adc_cali_handle_t adc1_cali_pressure_sensor_handle = NULL;
     bool do_calibration1_pressure_sensor = sensor_adc_calibration_init(ADC_UNIT_1, PRESSURE_SENSOR_PIN, ADC_ATTEN, &adc1_cali_pressure_sensor_handle);
     
+
+    ESP_LOGI(TAG, "Preparing sensor data structure");
+    sensor_data.pressure = 0;
 
     ESP_LOGI(TAG, "Starting pressure sensing cycle");
 
