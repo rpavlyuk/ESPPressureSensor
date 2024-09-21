@@ -7,6 +7,7 @@
 #include "hass.h"
 #include "non_volatile_storage.h"
 #include "settings.h"
+#include "status.h"
 
 /**
  * @brief: Initialize the device entity
@@ -562,19 +563,13 @@ char* ha_entity_discovery_print_JSON(ha_entity_discovery_t *discovery) {
     return json;
 }
 
-/**
- * @brief: Serialize pressure sensor data to JSON
- *
- */
-char *serialize_sensor_state(sensor_data_t *s_data) {
-    char *json = NULL;
-    cJSON *root = cJSON_CreateObject();
 
-    // Debugging: Print sensor data before serializing
-    /*
-    ESP_LOGD(TAG, "Data for the serialization (in function): Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
-             s_data->voltage_raw, s_data->voltage, s_data->pressure);
-    */
+/**
+ * @brief: Get CJSON object of sensor_data_t
+ */
+cJSON *sensor_state_to_JSON(sensor_data_t *s_data) {
+
+   cJSON *root = cJSON_CreateObject();
 
     cJSON *j_pressure = cJSON_CreateNumber(s_data->pressure);
     if (j_pressure != NULL) {
@@ -601,7 +596,93 @@ char *serialize_sensor_state(sensor_data_t *s_data) {
         cJSON_AddItemToObject(root, "voltage_raw", j_voltage_raw);
     }
 
-    json = cJSON_Print(root);
-    cJSON_Delete(root);
+    return root;
+}
+
+/**
+ * @brief: Serialize pressure sensor data to JSON
+ *
+ */
+char *serialize_sensor_state(sensor_data_t *s_data) {
+    char *json = NULL;
+
+    // Debugging: Print sensor data before serializing
+    /*
+    ESP_LOGD(TAG, "Data for the serialization (in function): Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
+             s_data->voltage_raw, s_data->voltage, s_data->pressure);
+    */
+
+    cJSON *c_json = sensor_state_to_JSON(s_data);
+    json = cJSON_Print(c_json);
+    cJSON_Delete(c_json);
     return json;
+}
+
+
+/**
+ * @brief: Get CJSON object of sensor_status_t
+ */
+cJSON *sensor_status_to_JSON(sensor_status_t *s_data) {
+
+    cJSON *root = cJSON_CreateObject();
+
+    cJSON *j_free_heap = cJSON_CreateNumber(s_data->free_heap);
+    if (j_free_heap != NULL) {
+        cJSON_AddItemToObject(root, "free_heap", j_free_heap);
+    }
+
+    cJSON *j_min_free_heap = cJSON_CreateNumber(s_data->min_free_heap);
+    if (j_min_free_heap != NULL) {
+        cJSON_AddItemToObject(root, "min_free_heap", j_min_free_heap);
+    }
+
+    cJSON *j_time_since_boot = cJSON_CreateNumber(s_data->time_since_boot);
+    if (j_time_since_boot != NULL) {
+        cJSON_AddItemToObject(root, "time_since_boot", j_time_since_boot);
+    }
+
+    return root;
+
+}
+
+/**
+ * @brief: Serialize sensor status information to JSON string
+ */
+char *serialize_sensor_status(sensor_status_t *s_data) {
+
+    char *json = NULL;
+    cJSON *c_json = sensor_state_to_JSON(s_data);
+
+    json = cJSON_Print(c_json);
+    cJSON_Delete(c_json);
+    return json;
+
+}
+
+/**
+ * @brief: Compile JSON object from sensor state and device status 
+ */
+cJSON *sensor_all_to_JSON(sensor_status_t *status, sensor_data_t *sensor) {
+
+    cJSON *root = cJSON_CreateObject();
+
+    cJSON_AddItemToObject(root, "sensor", sensor_state_to_JSON(sensor));
+    cJSON_AddItemToObject(root, "status", sensor_status_to_JSON(status));
+
+    return root;
+
+}
+
+/**
+ * @brief: Serialize all device data (sensor, status) to JSON
+ */
+char *serialize_all_device_data(sensor_status_t *status, sensor_data_t *sensor) {
+
+    char *json = NULL;
+    cJSON *c_json = sensor_all_to_JSON(status, sensor);
+
+    json = cJSON_Print(c_json);
+    cJSON_Delete(c_json);
+    return json;
+
 }

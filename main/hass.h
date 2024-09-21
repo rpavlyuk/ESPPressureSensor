@@ -6,6 +6,7 @@
 
 #include "common.h"
 #include "sensor.h"
+#include "status.h"
 
 #define HA_DEVICE_MANUFACTURER     "espressif"
 #define HA_DEVICE_MODEL            "esp32"
@@ -73,7 +74,13 @@ esp_err_t ha_entity_discovery_fullfill(ha_entity_discovery_t *discovery, const c
 esp_err_t ha_entity_discovery_free(ha_entity_discovery_t *discovery);
 cJSON *ha_entity_discovery_to_JSON(ha_entity_discovery_t *discovery);
 char* ha_entity_discovery_print_JSON(ha_entity_discovery_t *discovery);
+
+cJSON *sensor_state_to_JSON(sensor_data_t *s_data);
 char *serialize_sensor_state(sensor_data_t *sensor_data);
+cJSON *sensor_status_to_JSON(sensor_status_t *s_data);
+char *serialize_sensor_status(sensor_status_t *s_data);
+cJSON *sensor_all_to_JSON(sensor_status_t *status, sensor_data_t *sensor);
+char *serialize_all_device_data(sensor_status_t *status, sensor_data_t *sensor);
 
 
 #endif

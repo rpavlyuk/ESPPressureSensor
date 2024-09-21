@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdint.h>
 
 #include "status.h"
 #include "esp_log.h"
@@ -8,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "esp_heap_trace.h"
 #include "esp_debug_helpers.h"  // For esp_backtrace_print
+#include "esp_timer.h"
 
 static heap_trace_record_t trace_buffer[NUM_RECORDS];  // Buffer to store the trace records
 
@@ -68,4 +70,16 @@ void status_init() {
     // Start monitoring task
     ESP_LOGI(STATUS_TAG, "Starting system status task");
     xTaskCreate(status_task, "status_task", 4096, NULL, 1, NULL); // 4096 bytes of stack space
+}
+
+/**
+ * @brief: Initialize sensor device status
+ */
+esp_err_t sensor_status_init(sensor_status_t *status_data) {
+
+    status_data->free_heap = esp_get_free_heap_size();
+    status_data->min_free_heap = esp_get_minimum_free_heap_size();
+    status_data->time_since_boot = esp_timer_get_time();
+
+    return ESP_OK;
 }

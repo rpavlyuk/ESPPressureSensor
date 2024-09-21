@@ -12,6 +12,8 @@
 #include "sensor.h"
 #include "zigbee.h"
 #include "web.h"
+#include "status.h"
+#include "hass.h"
 
 void init_filesystem() {
     esp_vfs_spiffs_conf_t conf = {
@@ -54,6 +56,14 @@ void start_webserver(void) {
         };
         httpd_register_uri_handler(server, &config_uri);
 
+        httpd_uri_t status_uri = {
+            .uri       = "/status",
+            .method    = HTTP_GET,
+            .handler   = status_get_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &status_uri);
+
         httpd_uri_t submit_uri = {
             .uri       = "/submit",
             .method    = HTTP_POST,
@@ -79,6 +89,15 @@ void start_webserver(void) {
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &connect_zigbee_uri);
+
+        // Register the status web service handler
+        httpd_uri_t status_webserver_get_uri = {
+            .uri       = "/status-data",
+            .method    = HTTP_GET,
+            .handler   = status_data_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &status_webserver_get_uri);      
 
     } else {
         ESP_LOGI(TAG, "Error starting server!");
@@ -642,6 +661,97 @@ static esp_err_t connect_zigbee_handler(httpd_req_t *req) {
     } else {
         httpd_resp_sendstr(req, "Failed to initialize Zigbee.");
     }
+
+    return ESP_OK;
+}
+
+/**
+ * @brief: Status web-service
+ */
+static esp_err_t status_data_handler(httpd_req_t *req) {
+    
+    // Assuming you have a global or accessible structure containing sensor data
+    sensor_data_t sensor_data = get_sensor_data();  // Example: Get sensor data
+    sensor_status_t sensor_status;
+    ESP_ERROR_CHECK(sensor_status_init(&sensor_status));
+    
+    // Convert cJSON object to a string
+    const char *json_response = serialize_all_device_data(&sensor_status, &sensor_data);
+
+    
+    // Set the content type to JSON and send the response
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_response, strlen(json_response));
+
+    // Free allocated memory
+    free((void *)json_response);
+
+    return ESP_OK;
+}
+
+static esp_err_t status_get_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Processing status web request");
+
+    // Allocate memory dynamically for template and output
+    char *html_template = (char *)malloc(MAX_TEMPLATE_SIZE);
+    char *html_output = (char *)malloc(MAX_TEMPLATE_SIZE);
+
+    if (html_template == NULL || html_output == NULL) {
+        ESP_LOGE(TAG, "Memory allocation failed");
+        if (html_template) free(html_template);
+        if (html_output) free(html_output);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Read the template from SPIFFS (assuming you're loading it from SPIFFS)
+    FILE *f = fopen("/spiffs/status.html", "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for reading");
+        free(html_template);
+        free(html_output);
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    // Load the template into html_template
+    size_t len = fread(html_template, 1, MAX_TEMPLATE_SIZE, f);
+    fclose(f);
+    html_template[len] = '\0';  // Null-terminate the string
+
+    // Copy template into html_output for modification
+    strcpy(html_output, html_template);
+
+    // Allocate memory for the strings you will retrieve from NVS
+    char *device_id = NULL;
+    char *device_serial = NULL;
+    uint16_t sensor_intervl;
+
+    // Load settings from NVS (use default values if not set)
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
+
+    char sensor_intervl_str[10];
+    snprintf(sensor_intervl_str, sizeof(sensor_intervl_str), "%i", (uint16_t) sensor_intervl);
+
+    replace_placeholder(html_output, "{VAL_DEVICE_ID}", device_id);
+    replace_placeholder(html_output, "{VAL_DEVICE_SERIAL}", device_serial);
+    replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
+
+    // replace static fields
+    assign_static_page_variables(html_output);
+
+
+    // Send the final HTML response
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, html_output, strlen(html_output));
+
+    // Free dynamically allocated memory
+    free(html_template);
+    free(html_output);
+    free(device_id);
+    free(device_serial);
 
     return ESP_OK;
 }
