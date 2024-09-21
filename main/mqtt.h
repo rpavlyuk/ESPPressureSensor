@@ -22,7 +22,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 esp_err_t mqtt_init(void);
 
 // Function to publish sensor data
-void mqtt_publish_sensor_data(const sensor_data_t *sensor_data);
+esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data);
 
 // publish device definitions to Home Assistant
 void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_prefix, const char *homeassistant_prefix);

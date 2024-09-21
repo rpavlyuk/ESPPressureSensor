@@ -1,3 +1,5 @@
+#include <stddef.h>
+
 #include "status.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -5,6 +7,7 @@
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include "esp_heap_trace.h"
+#include "esp_debug_helpers.h"  // For esp_backtrace_print
 
 static heap_trace_record_t trace_buffer[NUM_RECORDS];  // Buffer to store the trace records
 
@@ -34,21 +37,21 @@ void status_task(void *pvParameters) {
             ESP_LOGI(STATUS_TAG, "No heap corruption detected");
         }
 
-        /* DISABLE -- causes crash
+        /* DISABLED -- sometimes causes crash 
         // Dump heap trace after some time (e.g., every 3 heap monitor cycles)
         if (cycle > period && heap_trace_stop() == ESP_OK) {
             ESP_LOGI(TAG, "Heap trace stopped. Dumping results...");
             heap_trace_dump();  // Dump the trace logs to check for leaks
-            heap_trace_start(HEAP_TRACE_LEAKS);  // Restart heap trace after dump
+            // Restart heap trace after dump
+            heap_trace_start(HEAP_TRACE_LEAKS);  
         }
-        */
+         */
 
 
         // Delay for a period (e.g., 10 seconds)
         vTaskDelay(pdMS_TO_TICKS(HEAP_DUMP_INTERVAL_MS));
     }
 }
-
 
 void status_init() {
     // Initialize heap tracing with a standalone buffer

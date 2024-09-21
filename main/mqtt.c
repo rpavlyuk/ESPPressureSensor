@@ -134,12 +134,13 @@ esp_err_t mqtt_init(void) {
     }
 
     // Proceed with MQTT connection
-    char *mqtt_server = (char *)malloc(MQTT_SERVER_LENGTH);
-    char *mqtt_protocol = (char *)malloc(MQTT_PROTOCOL_LENGTH);
-    char *mqtt_user = (char *)malloc(MQTT_USER_LENGTH);
-    char *mqtt_password = (char *)malloc(MQTT_PASSWORD_LENGTH);
-    char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
-    char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
+    char *mqtt_server = NULL;
+    char *mqtt_protocol = NULL;
+    char *mqtt_user = NULL;
+    char *mqtt_password = NULL;
+    char *mqtt_prefix = NULL;
+    char *device_id = NULL;
+
     uint16_t mqtt_port;
 
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_SERVER, &mqtt_server));
@@ -197,62 +198,69 @@ esp_err_t mqtt_init(void) {
 }
 
 // Function to publish sensor data
-void mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
+esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
     uint16_t mqtt_connection_mode;
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
-    if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
-        ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
-        return;
+    esp_err_t err;
+
+    // Read MQTT connection mode
+    err = nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MQTT connection mode from NVS");
+        return ESP_FAIL;
     }
 
-    // Ensure MQTT client is initialized
-    // NOTE: Not checking for connection as CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED is enabled
-// #if !CONFIG_MQTT_SKIP_PUBLISH_IF_DISCONNECTED
+    // Check if MQTT is disabled in the device settings
+    if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+        ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
+        return ESP_OK;
+    }
+
+    // Ensure MQTT client is initialized and connected
     if (mqtt_client == NULL || !mqtt_connected) {
         ESP_LOGW(TAG, "MQTT client is not initialized or not connected.");
         if (mqtt_connection_mode > (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
             ESP_LOGI(TAG, "Restoring connection to MQTT...");
             if (mqtt_init() != ESP_OK) {
                 ESP_LOGE(TAG, "MQTT client re-init failed. Will not publish any data to MQTT.");
-                return;
+                return ESP_FAIL;
             }
         } else {
-            ESP_LOGW(TAG, "Re-connect disable by MQTT mode setting. Visit device WEB interface to adjust it.");
-            return;
-        }
-    } else {
-        if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
-            ESP_LOGW(TAG, "MQTT client is active, but MQTT mode set to DISABLED.");
+            ESP_LOGW(TAG, "Re-connect disabled by MQTT mode setting. Visit device WEB interface to adjust it.");
+            return ESP_FAIL;
         }
     }
-// #endif
 
-    char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
-    char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
+    /* Declare NULL pointer for string variables */
+    char *mqtt_prefix = NULL;
+    char *device_id = NULL;
 
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix));
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
+    // Read MQTT prefix and device ID from NVS
+    err = nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MQTT prefix from NVS");
+        return ESP_ERR_NVS_BASE;
+    }
+
+    err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read device ID from NVS");
+        return ESP_ERR_NVS_BASE;
+    }
 
     // Create MQTT topics based on mqtt_prefix and device_id
-    char topic_state[256], topic_voltage[256], topic_voltage_raw[256], topic_voltage_offset[256], topic_pressure[256], topic_multiplier[256];
+    char topic_voltage[256], topic_voltage_raw[256], topic_voltage_offset[256], topic_pressure[256], topic_multiplier[256], topic_state[256];
     snprintf(topic_voltage, sizeof(topic_voltage), "%s/%s/sensor/voltage", mqtt_prefix, device_id);
     snprintf(topic_voltage_raw, sizeof(topic_voltage_raw), "%s/%s/sensor/voltage_raw", mqtt_prefix, device_id);
     snprintf(topic_voltage_offset, sizeof(topic_voltage_offset), "%s/%s/sensor/voltage_offset", mqtt_prefix, device_id);
     snprintf(topic_pressure, sizeof(topic_pressure), "%s/%s/sensor/pressure", mqtt_prefix, device_id);
     snprintf(topic_multiplier, sizeof(topic_multiplier), "%s/%s/sensor/multiplier", mqtt_prefix, device_id);
-    snprintf(topic_state, sizeof(topic_multiplier), "%s/%s/sensor", mqtt_prefix, device_id);
+    snprintf(topic_state, sizeof(topic_state), "%s/%s/sensor", mqtt_prefix, device_id);
 
     // Publish each sensor data field separately
     int msg_id;
     bool is_error = false;
     char value[32];
-
-    // Debugging: Print sensor data before serializing
-    /*
-    ESP_LOGI(TAG, "Data before separate publishing: Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
-             sensor_data->voltage_raw, sensor_data->voltage, sensor_data->pressure);
-    */
 
     // Publish voltage
     snprintf(value, sizeof(value), "%.3f", sensor_data->voltage);
@@ -276,7 +284,7 @@ void mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Topic %s not published", topic_voltage_offset);
         is_error = true;
-    }   
+    }
 
     // Publish pressure
     snprintf(value, sizeof(value), "%.2f", sensor_data->pressure);
@@ -284,9 +292,9 @@ void mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Topic %s not published", topic_pressure);
         is_error = true;
-    }  
+    }
 
-    // Publish sensor_linear_multiplier (use %lu for uint32_t)
+    // Publish sensor_linear_multiplier
     snprintf(value, sizeof(value), "%lu", (unsigned long)sensor_data->sensor_linear_multiplier);
     msg_id = esp_mqtt_client_publish(mqtt_client, topic_multiplier, value, 0, 1, 0);
     if (msg_id < 0) {
@@ -294,32 +302,33 @@ void mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
         is_error = true;
     }
 
+    // Free allocated resources for MQTT prefix and device ID
     free(mqtt_prefix);
     free(device_id);
 
     // Publishing JSON data
-
-    // Debugging: Print sensor data before serializing
-    /*
-    ESP_LOGI(TAG, "Data before serialization: Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
-             sensor_data->voltage_raw, sensor_data->voltage, sensor_data->pressure);
-    */
-
-    sensor_data_t s_data = get_sensor_data();
+    sensor_data_t s_data = get_sensor_data();  // Create a copy of sensor_data to ensure consistency
     char *sensor_data_json = serialize_sensor_state(&s_data);
-    ESP_LOGI(TAG, "Sensor data serialized:\n%s", sensor_data_json);
-    msg_id = esp_mqtt_client_publish(mqtt_client, topic_state, sensor_data_json, 0, 0, true);
-      if (msg_id < 0) {
-        ESP_LOGW(TAG, "Topic %s not published", topic_state);
+    if (sensor_data_json != NULL) {
+        ESP_LOGI(TAG, "Sensor data serialized:\n%s", sensor_data_json);
+        msg_id = esp_mqtt_client_publish(mqtt_client, topic_state, sensor_data_json, 0, 0, true);
+        if (msg_id < 0) {
+            ESP_LOGW(TAG, "Topic %s not published", topic_state);
+            is_error = true;
+        }
+        free(sensor_data_json);  // Free the JSON string after use
+    } else {
+        ESP_LOGE(TAG, "Failed to serialize sensor data");
         is_error = true;
     }
 
     if (is_error) {
         ESP_LOGE(TAG, "There were errors when publishing sensor data to MQTT");
+        return ESP_FAIL;
     } else {
         ESP_LOGI(TAG, "MQTT sensor data published successfully.");
-    }  
-
+        return ESP_OK;
+    }
 }
 
 // Call this function when you are shutting down the application or no longer need the MQTT client
@@ -445,14 +454,13 @@ void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_
 }
 
 void mqtt_device_config_task(void *param) {
-    char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
-    char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
-    char *ha_prefix = (char *)malloc(HA_PREFIX_LENGTH);
+    char *device_id = NULL;
+    char *mqtt_prefix = NULL;
+    char *ha_prefix = NULL;
+    uint32_t ha_upd_intervl;
 
     const char* LOG_TAG = "HA MQTT DEVICE";
-    
-    uint32_t ha_upd_intervl;
-    
+      
     // Load MQTT prefix from NVS
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));

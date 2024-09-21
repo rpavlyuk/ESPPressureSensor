@@ -196,40 +196,40 @@ esp_err_t settings_init() {
     }
 
     // Parameter: Device ID (actually, MAC)
-    char device_id[DEVICE_ID_LENGTH + 1];
+    char *device_id = NULL;
     if (nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id) == ESP_OK) {
         ESP_LOGI(TAG, "Found parameter %s in NVS: %s", S_KEY_DEVICE_ID, device_id);
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_DEVICE_ID);
 
+        char new_device_id[DEVICE_ID_LENGTH+1];
         uint8_t mac[6];  // Array to hold the MAC address
         esp_read_mac(mac, ESP_MAC_WIFI_STA);  // Use esp_read_mac to get the MAC address
 
         // Extract the last 3 bytes (6 characters in hexadecimal) of the MAC address
-        snprintf(device_id, sizeof(device_id), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        snprintf(device_id, sizeof(new_device_id), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-        if (nvs_write_string(S_NAMESPACE, S_KEY_DEVICE_ID, device_id) == ESP_OK) {
-            ESP_LOGI(TAG, "Successfully created key %s with value %s", S_KEY_DEVICE_ID, device_id);
+        if (nvs_write_string(S_NAMESPACE, S_KEY_DEVICE_ID, new_device_id) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %s", S_KEY_DEVICE_ID, new_device_id);
         } else {
-            ESP_LOGE(TAG, "Failed creating key %s with value %s", S_KEY_DEVICE_ID, device_id);
+            ESP_LOGE(TAG, "Failed creating key %s with value %s", S_KEY_DEVICE_ID, new_device_id);
             return ESP_FAIL;
         }
     }
     // free(device_id); // for string (char*) params only
 
     // Parameter: Device Serial (to be used for API)
-    char device_serial[DEVICE_SERIAL_LENGTH + 1];
+    char *device_serial = NULL;
     if (nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial) == ESP_OK) {
         ESP_LOGI(TAG, "Found parameter %s in NVS: %s", S_KEY_DEVICE_SERIAL, device_serial);
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_DEVICE_SERIAL);
-
-        generate_serial_number(device_serial);
-       
-        if (nvs_write_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, device_serial) == ESP_OK) {
-            ESP_LOGI(TAG, "Successfully created key %s with value %s", S_KEY_DEVICE_SERIAL, device_serial);
+        char new_device_serial[DEVICE_SERIAL_LENGTH+1];
+        generate_serial_number(new_device_serial);       
+        if (nvs_write_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, new_device_serial) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %s", S_KEY_DEVICE_SERIAL, new_device_serial);
         } else {
-            ESP_LOGE(TAG, "Failed creating key %s with value %s", S_KEY_DEVICE_SERIAL, device_serial);
+            ESP_LOGE(TAG, "Failed creating key %s with value %s", S_KEY_DEVICE_SERIAL, new_device_serial);
             return ESP_FAIL;
         }
     }

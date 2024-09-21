@@ -22,7 +22,7 @@ esp_err_t ha_device_init(ha_device_t *device) {
         ESP_LOGE(TAG, "Failed to allocate memory for manufacturer");
         return ESP_ERR_NO_MEM;
     }
-    ESP_LOGI(TAG, "DEVICE: assigned manufacturer: %s", device->manufacturer);
+    ESP_LOGD(TAG, "DEVICE: assigned manufacturer: %s", device->manufacturer);
 
     // Assign model
     device->model = strdup(HA_DEVICE_MODEL);
@@ -31,7 +31,7 @@ esp_err_t ha_device_init(ha_device_t *device) {
         free(device->manufacturer);  // Cleanup previously allocated memory
         return ESP_ERR_NO_MEM;
     }
-    ESP_LOGI(TAG, "DEVICE: assigned model: %s", device->model);
+    ESP_LOGD(TAG, "DEVICE: assigned model: %s", device->model);
 
     // Assign configuration URL (based on IP address)
     device->configuration_url = (char *)malloc(CFG_URL_LEN);
@@ -45,27 +45,19 @@ esp_err_t ha_device_init(ha_device_t *device) {
     if (esp_netif_get_ip_info(esp_netif_sta, &ip_info) == ESP_OK) {
         sprintf(device->configuration_url, "http://%d.%d.%d.%d/", IP2STR(&ip_info.ip));
     }
-    ESP_LOGI(TAG, "DEVICE: assigned configuration_url: %s", device->configuration_url);
+    ESP_LOGD(TAG, "DEVICE: assigned configuration_url: %s", device->configuration_url);
 
     // Assign device name
-    device->name = (char *)malloc(DEVICE_ID_LENGTH + 1);
-    if (device->name == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for name");
-        free(device->manufacturer);
-        free(device->model);
-        free(device->configuration_url);
-        return ESP_ERR_NO_MEM;
-    }
+    device->name = NULL;
     esp_err_t err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device->name);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read device name from NVS");
         free(device->manufacturer);
         free(device->model);
         free(device->configuration_url);
-        free(device->name);
         return err;
     }
-    ESP_LOGI(TAG, "DEVICE: assigned name: %s", device->name);
+    ESP_LOGD(TAG, "DEVICE: assigned name: %s", device->name);
 
     // Assign via_device (set to an empty string)
     device->via_device = strdup("");
@@ -77,19 +69,10 @@ esp_err_t ha_device_init(ha_device_t *device) {
         free(device->name);
         return ESP_ERR_NO_MEM;
     }
-    ESP_LOGI(TAG, "DEVICE: assigned via_device: %s", device->via_device);
+    ESP_LOGD(TAG, "DEVICE: assigned via_device: %s", device->via_device);
 
     // Assign identifiers[0]
-    device->identifiers[0] = (char *)malloc(DEVICE_SERIAL_LENGTH + 1);
-    if (device->identifiers[0] == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for identifiers[0]");
-        free(device->manufacturer);
-        free(device->model);
-        free(device->configuration_url);
-        free(device->name);
-        free(device->via_device);
-        return ESP_ERR_NO_MEM;
-    }
+    device->identifiers[0] = NULL;
     err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device->identifiers[0]);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read device serial from NVS");
@@ -98,10 +81,9 @@ esp_err_t ha_device_init(ha_device_t *device) {
         free(device->configuration_url);
         free(device->name);
         free(device->via_device);
-        free(device->identifiers[0]);
         return err;
     }
-    ESP_LOGI(TAG, "DEVICE: assigned identifiers[0]: %s", device->identifiers[0]);
+    ESP_LOGD(TAG, "DEVICE: assigned identifiers[0]: %s", device->identifiers[0]);
 
     return ESP_OK;
 }
@@ -177,30 +159,19 @@ esp_err_t ha_availability_init(ha_entity_availability_t *availability) {
     }
 
     // Allocate and read the MQTT prefix
-    char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
-    if (mqtt_prefix == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for MQTT prefix");
-        return ESP_ERR_NO_MEM;
-    }
+    char *mqtt_prefix = NULL;
     esp_err_t err = nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read MQTT prefix from NVS");
-        free(mqtt_prefix);  // Clean up if NVS read fails
         return err;
     }
 
     // Allocate and read the device ID
-    char *device_id = (char *)malloc(DEVICE_ID_LENGTH + 1);
-    if (device_id == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for device ID");
-        free(mqtt_prefix);  // Clean up previous allocation
-        return ESP_ERR_NO_MEM;
-    }
+    char *device_id = NULL;
     err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read device ID from NVS");
         free(mqtt_prefix);  // Clean up previous allocation
-        free(device_id);    // Clean up if NVS read fails
         return err;
     }
 
@@ -216,7 +187,7 @@ esp_err_t ha_availability_init(ha_entity_availability_t *availability) {
 
     // Construct the availability topic
     snprintf(availability->topic, topic_len, "%s/%s/%s", mqtt_prefix, device_id, HA_DEVICE_STATUS_PATH);
-    ESP_LOGI(TAG, "DISCOVERY::AVAILABILITY: assigned availability topic: %s", availability->topic);
+    ESP_LOGD(TAG, "DISCOVERY::AVAILABILITY: assigned availability topic: %s", availability->topic);
 
     // Clean up temporary variables
     free(mqtt_prefix);
@@ -279,7 +250,7 @@ esp_err_t ha_origin_init(ha_entity_origin_t *origin) {
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_LOGI(TAG, "Origin initialized: name=%s, url=%s, sw=%s", origin->name, origin->url, origin->sw);
+    ESP_LOGD(TAG, "Origin initialized: name=%s, url=%s, sw=%s", origin->name, origin->url, origin->sw);
     return ESP_OK;
 }
 
@@ -351,12 +322,12 @@ esp_err_t ha_entity_discovery_init(ha_entity_discovery_t *discovery) {
     }
 
     // Log device details
-    ESP_LOGI(TAG, "DISCOVERY::DEVICE: manufacturer: %s", discovery->device->manufacturer);
-    ESP_LOGI(TAG, "DISCOVERY::DEVICE: model: %s", discovery->device->model);
-    ESP_LOGI(TAG, "DISCOVERY::DEVICE: name: %s", discovery->device->name);
-    ESP_LOGI(TAG, "DISCOVERY::DEVICE: configuration_url: %s", discovery->device->configuration_url);
-    ESP_LOGI(TAG, "DISCOVERY::DEVICE: via_device: %s", discovery->device->via_device);
-    ESP_LOGI(TAG, "DISCOVERY::DEVICE: identifiers[0]: %s", discovery->device->identifiers[0]);
+    ESP_LOGD(TAG, "DISCOVERY::DEVICE: manufacturer: %s", discovery->device->manufacturer);
+    ESP_LOGD(TAG, "DISCOVERY::DEVICE: model: %s", discovery->device->model);
+    ESP_LOGD(TAG, "DISCOVERY::DEVICE: name: %s", discovery->device->name);
+    ESP_LOGD(TAG, "DISCOVERY::DEVICE: configuration_url: %s", discovery->device->configuration_url);
+    ESP_LOGD(TAG, "DISCOVERY::DEVICE: via_device: %s", discovery->device->via_device);
+    ESP_LOGD(TAG, "DISCOVERY::DEVICE: identifiers[0]: %s", discovery->device->identifiers[0]);
 
     // Allocate and initialize the origin
     discovery->origin = (ha_entity_origin_t *)malloc(sizeof(ha_entity_origin_t));
@@ -377,22 +348,13 @@ esp_err_t ha_entity_discovery_init(ha_entity_discovery_t *discovery) {
     }
 
     // Log origin details
-    ESP_LOGI(TAG, "DISCOVERY::ORIGIN: name: %s", discovery->origin->name);
-    ESP_LOGI(TAG, "DISCOVERY::ORIGIN: sw: %s", discovery->origin->sw);
-    ESP_LOGI(TAG, "DISCOVERY::ORIGIN: url: %s", discovery->origin->url);
+    ESP_LOGD(TAG, "DISCOVERY::ORIGIN: name: %s", discovery->origin->name);
+    ESP_LOGD(TAG, "DISCOVERY::ORIGIN: sw: %s", discovery->origin->sw);
+    ESP_LOGD(TAG, "DISCOVERY::ORIGIN: url: %s", discovery->origin->url);
 
     // Allocate and read MQTT prefix and device ID from NVS
-    char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
-    char *device_id = (char *)malloc(DEVICE_ID_LENGTH + 1);
-    if (mqtt_prefix == NULL || device_id == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for MQTT prefix or device ID");
-        free(discovery->availability);
-        free(discovery->device);
-        free(discovery->origin);
-        free(mqtt_prefix);
-        free(device_id);
-        return ESP_ERR_NO_MEM;
-    }
+    char *mqtt_prefix = NULL;
+    char *device_id = NULL;
 
     err = nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix);
     if (err != ESP_OK) {
@@ -400,8 +362,6 @@ esp_err_t ha_entity_discovery_init(ha_entity_discovery_t *discovery) {
         free(discovery->availability);
         free(discovery->device);
         free(discovery->origin);
-        free(mqtt_prefix);
-        free(device_id);
         return err;
     }
 
@@ -411,8 +371,6 @@ esp_err_t ha_entity_discovery_init(ha_entity_discovery_t *discovery) {
         free(discovery->availability);
         free(discovery->device);
         free(discovery->origin);
-        free(mqtt_prefix);
-        free(device_id);
         return err;
     }
 
@@ -469,24 +427,12 @@ esp_err_t ha_entity_discovery_fullfill(ha_entity_discovery_t *discovery, const c
     }
 
     // Allocate and read device ID and device serial
-    char *device_id = (char *)malloc(DEVICE_ID_LENGTH + 1);
-    if (device_id == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for device ID");
-        return ESP_ERR_NO_MEM;
-    }
-
-    char *device_serial = (char *)malloc(DEVICE_SERIAL_LENGTH + 1);
-    if (device_serial == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for device serial");
-        free(device_id);
-        return ESP_ERR_NO_MEM;
-    }
+    char *device_id = NULL;
+    char *device_serial = NULL;
 
     err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id);  // Removed & before device_id
     if (err != ESP_OK || device_id[0] == '\0') {  // Check if the device_id was actually read
         ESP_LOGE(TAG, "Failed to read device ID from NVS or device ID is empty");
-        free(device_id);
-        free(device_serial);
         return err;
     }
 
@@ -494,7 +440,6 @@ esp_err_t ha_entity_discovery_fullfill(ha_entity_discovery_t *discovery, const c
     if (err != ESP_OK || device_serial[0] == '\0') {  // Check if the device_serial was actually read
         ESP_LOGE(TAG, "Failed to read device serial from NVS or device serial is empty");
         free(device_id);
-        free(device_serial);
         return err;
     }
 
@@ -627,7 +572,7 @@ char *serialize_sensor_state(sensor_data_t *s_data) {
 
     // Debugging: Print sensor data before serializing
     /*
-    ESP_LOGI(TAG, "Data for the serialization (in function): Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
+    ESP_LOGD(TAG, "Data for the serialization (in function): Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
              s_data->voltage_raw, s_data->voltage, s_data->pressure);
     */
 

@@ -160,13 +160,13 @@ void sensor_run(void *pvParameters) {
 
         uint16_t mqtt_connection_mode;
         ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
-        if (mqtt_connection_mode != (uint16_t)MQTT_SENSOR_MODE_DISABLE) {
-            ESP_LOGI(TAG, "Sensor Run - Before MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
+        if (mqtt_connection_mode > MQTT_SENSOR_MODE_DISABLE) {
+            ESP_LOGD(TAG, "Sensor Run - Before MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
 
             // Publish the sensor data via MQTT
-            mqtt_publish_sensor_data(&sensor_data);
+            ESP_ERROR_CHECK(mqtt_publish_sensor_data(&sensor_data));
 
-            ESP_LOGI(TAG, "Sensor Run - After MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
+            ESP_LOGD(TAG, "Sensor Run - After MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
         }
 
         uint16_t sensor_intervl = S_DEFAULT_SENSOR_READ_INTERVAL;

@@ -123,14 +123,14 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     strcpy(html_output, html_template);
 
     // Allocate memory for the strings you will retrieve from NVS
-    char *mqtt_server = (char *)malloc(MQTT_SERVER_LENGTH);
-    char *mqtt_protocol = (char *)malloc(MQTT_PROTOCOL_LENGTH);
-    char *mqtt_user = (char *)malloc(MQTT_USER_LENGTH);
-    char *mqtt_password = (char *)malloc(MQTT_PASSWORD_LENGTH);
-    char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
-    char *ha_prefix = (char *)malloc(HA_PREFIX_LENGTH);
-    char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
-    char *device_serial = (char *)malloc(DEVICE_SERIAL_LENGTH+1);
+    char *mqtt_server = NULL;
+    char *mqtt_protocol = NULL;
+    char *mqtt_user = NULL;
+    char *mqtt_password = NULL;
+    char *mqtt_prefix = NULL;
+    char *ha_prefix = NULL;
+    char *device_id = NULL;
+    char *device_serial = NULL;
 
     uint16_t mqtt_connect;
     uint16_t mqtt_port;
@@ -143,21 +143,6 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     uint16_t sensor_deviate;
 
     uint16_t sensor_intervl;
-
-
-    if (!mqtt_server || !mqtt_protocol || !mqtt_user || !mqtt_password || !mqtt_prefix || !ha_prefix) {
-        ESP_LOGE(TAG, "Memory allocation failed for NVS strings");
-        free(html_template);
-        free(html_output);
-        if (mqtt_server) free(mqtt_server);
-        if (mqtt_protocol) free(mqtt_protocol);
-        if (mqtt_user) free(mqtt_user);
-        if (mqtt_password) free(mqtt_password);
-        if (mqtt_prefix) free(mqtt_prefix);
-        if (ha_prefix) free(ha_prefix);
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
 
     // Load settings from NVS (use default values if not set)
     ESP_ERROR_CHECK(nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_offset));
@@ -293,6 +278,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     strcpy(html_output, html_template);
 
     // Allocate memory for the strings you will retrieve from NVS
+    // We need to pre-allocate memory as we are loading those values from POST request
     char *mqtt_server = (char *)malloc(MQTT_SERVER_LENGTH);
     char *mqtt_protocol = (char *)malloc(MQTT_PROTOCOL_LENGTH);
     char *mqtt_user = (char *)malloc(MQTT_USER_LENGTH);
@@ -381,8 +367,26 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, mqtt_connect));
 
     /** Load and display settings */
-    char *device_id = (char *)malloc(DEVICE_ID_LENGTH+1);
-    char *device_serial = (char *)malloc(DEVICE_SERIAL_LENGTH+1);
+
+    // Free pointers to previosly used strings
+    free(mqtt_server);
+    free(mqtt_protocol);
+    free(mqtt_user);
+    free(mqtt_password);
+    free(mqtt_prefix);
+    free(ha_prefix);
+
+    // declaring NULL pointers for neccessary variables
+    char *device_id = NULL;
+    char *device_serial = NULL;
+
+    // resetting the pointers
+    mqtt_server = NULL;
+    mqtt_protocol = NULL;
+    mqtt_user = NULL;
+    mqtt_password = NULL;
+    mqtt_prefix = NULL;
+    ha_prefix = NULL;
 
     // Load settings from NVS (use default values if not set)
     ESP_ERROR_CHECK(nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_data.voltage_offset));
