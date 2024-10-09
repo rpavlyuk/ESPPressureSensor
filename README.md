@@ -1,3 +1,6 @@
+[![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://stand-with-ukraine.pp.ua)
+[![Made in Ukraine](https://img.shields.io/badge/Made_in-Ukraine-ffd700.svg?labelColor=0057b7)](https://stand-with-ukraine.pp.ua)
+
 # ESP32 Pressure Sensor Firmware
 
 ## Purpose
@@ -113,5 +116,6 @@ The device will automatically enable itself in Home Assistant if:
 
 ## License and Credits
 * GPLv3 -- you're free to use and modify the code
+* Uses [ESP32_NVS](https://github.com/VPavlusha/ESP32_NVS) library by [VPavlusha](https://github.com/VPavlusha)
 * Consider putting a star if you like the project
-* Find me at [roman.pavlyuk@gmail.com]
+* Find me at roman.pavlyuk@gmail.com
