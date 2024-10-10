@@ -124,8 +124,14 @@ The device will automatically enable itself in Home Assistant if:
 * `HomeAssistant Device integration MQTT Prefix` is set correctly
 * auto-discovery is enable in Home Assistant (should be enabled by default)
 
+## WEB API
+The device is exposing a simple read-only API URL to get the device status and sensor data.
+```
+http://<WIFI-IP>/status-data
+```
+
 ## Known issues, problems and TODOs:
-* CA certification configuration for SSL (mqtts) mode to be implemented
+* ~~CA certification configuration for SSL (mqtts) mode to be implemented~~
 * Static IP support needed
 * Device may have memory leaks when used very intensively (to be improved)
 
