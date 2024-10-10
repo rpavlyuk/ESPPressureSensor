@@ -66,8 +66,24 @@ You may consider the other IO pin so you can change `PRESSURE_SENSOR_PIN` in fil
    ```
    Replace `/dev/ttyUSB0` with the appropriate port for your system.
 
-## Initiation
+> [!NOTE]
+> Every time you change the board type (e.g., from ESP32-C6 to ESP32-S3, the framework is re-creating `sdkconfig` file which makes some very important settings gone. Thus, you (might) need to change/set some settings **if you've changed the device board**:
+* Open SDK settings menu by running:
+  ```bash
+  idf.py menuconfig
+  ```
+* Set the following parameters:
+  * *Partition table -> Custom partition table CSV* as the option
+  * *Partition table -> Custom partition CSV file* set to `partition_table/partition.csv`
+  * *Serial flasher config -> Flash size* to 4Mb or 8Mb
+  * *Serial flasher config -> Detect flash size when flashing bootloader* to enabled
+  * *Component config -> HTTP Server -> Max HTTP Request Header Length* to `8192`
+  * *Component config → ESP System Settings -> Event loop task stack size* to `4096`
+  * *Component config → ESP System Settings -> Main task stack size* to `4096`
+  * *Component config → ESP System Settings -> Minimal allowed size for shared stack* to `2048`
 
+
+## Initiation
 ### WiFi Setup
 * On the first boot, the device will start in access point mode with the SSID `PROV_AP_XXXXXX`. The exact named will be different depending on the device hardware ID (which is built in). The password is SSID name plus `1234`. For example, `PROV_AP_XXXXXX1234`
 * Use the *ESP SoftAP Prov* ([iOS](https://apps.apple.com/us/app/esp-softap-provisioning/id1474040630), [Android](https://play.google.com/store/apps/details?id=com.espressif.provsoftap&hl=en)) mobile app to connect to the device and configure WiFi settings. Read more [here](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/provisioning/provisioning.html#provisioning-tools) if you want to know more about the SoftAP provisioning.
