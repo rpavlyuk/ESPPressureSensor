@@ -204,10 +204,10 @@ esp_err_t settings_init() {
 
         char new_device_id[DEVICE_ID_LENGTH+1];
         uint8_t mac[6];  // Array to hold the MAC address
-        esp_read_mac(mac, ESP_MAC_WIFI_STA);  // Use esp_read_mac to get the MAC address
+        ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));  // Use esp_read_mac to get the MAC address
 
         // Extract the last 3 bytes (6 characters in hexadecimal) of the MAC address
-        snprintf(device_id, sizeof(new_device_id), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        snprintf(new_device_id, sizeof(new_device_id), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
         if (nvs_write_string(S_NAMESPACE, S_KEY_DEVICE_ID, new_device_id) == ESP_OK) {
             ESP_LOGI(TAG, "Successfully created key %s with value %s", S_KEY_DEVICE_ID, new_device_id);
