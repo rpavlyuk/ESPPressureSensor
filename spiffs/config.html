@@ -61,6 +61,16 @@
             <tr><td>Threshold for samples filtering (%):</td><td><input type="number" step="1" name="sensor_deviate" value="{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}" min="{MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION}" max="{MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION}"/> ({MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION} - {MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION})</td></tr>
         </table>
         <input type="submit" value="Save Settings">
+        <input type="reset" value="Reset Changes">
+    </form>
+    <br/>
+    <h3>CA / Root Certificate</h3>
+    <p>This is a CA certificate in PEM format that the device will use to validate the SSL certificate if you're using <tt>mqtts</tt> protocol.<br/><b>NOTE:</b> The entire certification path shall be represented, including the root and intermediate certificates, as the device has no root certificates installed.</p>
+    <form action="/ca-cert" method="POST">
+      <textarea id="ca_cert_id" name="ca_cert" rows="8" cols="40">{VAL_CA_CERT}</textarea>
+      <br/>
+      <input type="submit" value="Save Certificate">
+      <input type="reset" value="Reset Changes">
     </form>
     <br/>
     <h3>Device Management</h3>

@@ -59,6 +59,33 @@ esp_err_t load_ca_certificate(char **ca_cert)
     return ESP_OK;
 }
 
+esp_err_t save_ca_certificate(const char *ca_cert)
+{
+    if (ca_cert == NULL) {
+        ESP_LOGE(TAG, "CA certificate data is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    FILE *f = fopen(CA_CERT_PATH, "w");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open CA certificate file for writing");
+        return ESP_FAIL;
+    }
+
+    // Write the certificate to the file
+    size_t written = fwrite(ca_cert, 1, strlen(ca_cert), f);
+    if (written != strlen(ca_cert)) {
+        ESP_LOGE(TAG, "Failed to write entire CA certificate to file");
+        fclose(f);
+        return ESP_FAIL;
+    }
+
+    fclose(f);
+    ESP_LOGI(TAG, "Successfully saved CA certificate");
+
+    return ESP_OK;
+}
+
 /*
  * @brief Event handler registered to receive MQTT events
  *

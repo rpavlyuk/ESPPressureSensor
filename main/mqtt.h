@@ -15,7 +15,14 @@ typedef enum {
 #define CA_CERT_PATH "/spiffs/ca.crt"
 
 static void log_error_if_nonzero(const char *message, int error_code);
+
+// load CA certification from the filesystem
 esp_err_t load_ca_certificate(char **ca_cert);
+
+// save CA certification to the filesystem
+esp_err_t save_ca_certificate(const char *ca_cert);
+
+// MQTT Event loop handler
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 
 // Function to initialize the MQTT client

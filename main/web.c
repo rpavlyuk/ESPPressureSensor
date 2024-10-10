@@ -14,6 +14,7 @@
 #include "web.h"
 #include "status.h"
 #include "hass.h"
+#include "mqtt.h"
 
 void init_filesystem() {
     esp_vfs_spiffs_conf_t conf = {
@@ -97,7 +98,17 @@ void start_webserver(void) {
             .handler   = status_data_handler,
             .user_ctx  = NULL
         };
-        httpd_register_uri_handler(server, &status_webserver_get_uri);      
+        httpd_register_uri_handler(server, &status_webserver_get_uri);
+
+        httpd_uri_t ca_cert_uri = {
+            .uri       = "/ca-cert",
+            .method    = HTTP_POST,
+            .handler   = ca_cert_post_handler,
+            .user_ctx  = NULL
+        };
+
+        // Register the handler
+        httpd_register_uri_handler(server, &ca_cert_uri);  
 
     } else {
         ESP_LOGI(TAG, "Error starting server!");
@@ -150,6 +161,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     char *ha_prefix = NULL;
     char *device_id = NULL;
     char *device_serial = NULL;
+    char *ca_cert = NULL;
 
     uint16_t mqtt_connect;
     uint16_t mqtt_port;
@@ -181,6 +193,14 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
+
+    // Load the CA certificate
+    if (load_ca_certificate(&ca_cert) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load CA certificate from %s", CA_CERT_PATH);
+        return ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH);
+    }
 
     // Replace placeholders in the template with actual values
     char mqtt_port_str[6];
@@ -220,6 +240,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}", sensor_deviate_str);
     replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
     replace_placeholder(html_output, "{VAL_MQTT_CONNECT}", mqtt_connect_str);
+    replace_placeholder(html_output, "{VAL_CA_CERT}", ca_cert);
 
     // replace static fields
     assign_static_page_variables(html_output);
@@ -240,6 +261,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     free(ha_prefix);
     free(device_id);
     free(device_serial);
+    free(ca_cert);
 
     return ESP_OK;
 }
@@ -304,6 +326,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     char *mqtt_password = (char *)malloc(MQTT_PASSWORD_LENGTH);
     char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
     char *ha_prefix = (char *)malloc(HA_PREFIX_LENGTH);
+    char *ca_cert = NULL;
 
     char mqtt_port_str[6], sensor_offset_str[10], sensor_linear_multiplier_str[10];
     char ha_upd_intervl_str[10];
@@ -426,6 +449,14 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
 
+    // Load the CA certificate
+    if (load_ca_certificate(&ca_cert) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load CA certificate from %s", CA_CERT_PATH);
+        return ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH);
+    }
+
     // Replace placeholders in the template with actual values
     snprintf(mqtt_port_str, sizeof(mqtt_port_str), "%u", mqtt_port);
     snprintf(sensor_offset_str, sizeof(sensor_offset_str), "%.3f", sensor_data.voltage_offset);
@@ -457,6 +488,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}", sensor_deviate_str);
     replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
     replace_placeholder(html_output, "{VAL_MQTT_CONNECT}", mqtt_connect_str);
+    replace_placeholder(html_output, "{VAL_CA_CERT}", ca_cert);
 
     // replace static fields
     assign_static_page_variables(html_output);
@@ -478,6 +510,7 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     free(ha_prefix);
     free(device_id);
     free(device_serial);
+    free(ca_cert);
 
     return ESP_OK;
 }
@@ -554,7 +587,7 @@ void replace_placeholder(char *html_output, const char *placeholder, const char 
 }
 
 // Function to safely extract a single parameter value from the POST buffer
-void extract_param_value(char *buf, const char *param_name, char *output, size_t output_size) {
+int extract_param_value(const char *buf, const char *param_name, char *output, size_t output_size) {
     char *start = strstr(buf, param_name);
     if (start != NULL) {
         start += strlen(param_name);  // Move to the value part
@@ -568,38 +601,60 @@ void extract_param_value(char *buf, const char *param_name, char *output, size_t
         }
         strncpy(output, start, len);
         output[len] = '\0';  // Null-terminate the result
+        return len;  // Return the length of the extracted value
     } else {
         output[0] = '\0';  // If not found, return an empty string
+        return 0;  // Return 0 length when not found
+    }
+}
+
+// helper function that will find the last occurrence of the given substring (lookup) in the input string (str) and truncate the string at that point
+void str_trunc_after(char *str, const char *lookup) {
+    if (str == NULL || lookup == NULL) {
+        return; // Return if either input is NULL
+    }
+
+    char *last_occurrence = NULL;
+    char *current_position = str;
+
+    // Find the last occurrence of the substring 'lookup' in 'str'
+    while ((current_position = strstr(current_position, lookup)) != NULL) {
+        last_occurrence = current_position;
+        current_position += strlen(lookup); // Move past the current match
+    }
+
+    // If the 'lookup' substring was found, truncate the string after its last occurrence
+    if (last_occurrence != NULL) {
+        last_occurrence[strlen(lookup)] = '\0'; // Null-terminate after the last occurrence
     }
 }
 
 // Helper function to convert a hexadecimal character to its decimal value
-int hex2dec(char c) {
+int hex_to_dec(char c) {
     if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
     return -1;
 }
 
 // URL decoding function
-void url_decode(char *str) {
-    char *src = str, *dst = str;
+void url_decode(char *src) {
+    char *dst = src;
     while (*src) {
-        // Cast characters to unsigned char before using isxdigit
-        if ((*src == '%') && isxdigit((unsigned char)*(src + 1)) && isxdigit((unsigned char)*(src + 2))) {
-            // Convert the next two hexadecimal characters to the actual character
-            *dst = (char)((hex2dec(*(src + 1)) << 4) | hex2dec(*(src + 2)));
-            src += 3;  // Skip past the % and the two hex characters
+        if (*src == '%' && src[1] && src[2]) {
+            // Convert hex to character
+            *dst = (char)((hex_to_dec(src[1]) << 4) | hex_to_dec(src[2]));
+            src += 2;
         } else if (*src == '+') {
-            *dst = ' ';  // Convert '+' to space
-            src++;
+            // Replace '+' with space
+            *dst = ' ';
         } else {
-            *dst = *src;  // Copy character as-is
-            src++;
+            *dst = *src;
         }
+        src++;
         dst++;
     }
-    *dst = '\0';  // Null-terminate the decoded string
+    *dst = '\0'; // Null-terminate the decoded string
 }
 
 static esp_err_t reboot_handler(httpd_req_t *req) {
@@ -752,6 +807,89 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
     free(html_output);
     free(device_id);
     free(device_serial);
+
+    return ESP_OK;
+}
+
+static esp_err_t ca_cert_post_handler(httpd_req_t *req) {
+    // Buffer to hold the received certificate
+    char buf[512];
+    memset(buf, 0, sizeof(buf));  // Initialize the buffer with zeros to avoid any garbage
+    int total_len = req->content_len;
+    int received = 0;
+
+    // Send HTML response with a redirect after 30 seconds
+    const char *success_html = "<html>"
+                                "<head>"
+                                    "<title>Redirecting...</title>"
+                                    "<meta http-equiv=\"refresh\" content=\"5;url=/\" />"
+                                    "<script>"
+                                        "setTimeout(function() { window.location.href = '/'; }, 5000);"
+                                    "</script>"
+                                "</head>"
+                                "<body>"
+                                    "<h2>Certficate has been saved successfully!</h2>"
+                                    "<p>Please wait, you will be redirected to the <a href=\"/\">home page</a> in 5 seconds.</p>"
+                                "</body>"
+                              "</html>";
+
+
+    // Allocate memory for the certificate outside the stack
+    char *content = (char *)malloc(total_len + 1);
+    if (content == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for CA certificate");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Read the certificate data from the request in chunks
+    while (received < total_len) {
+        int ret = httpd_req_recv(req, buf, MIN(total_len - received, sizeof(buf)));
+        if (ret <= 0) {
+            ESP_LOGE(TAG, "Failed to receive POST data");
+            free(content); // Free the allocated memory in case of failure
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive data");
+            return ESP_FAIL;
+        }
+        memcpy(content + received, buf, ret);
+        received += ret;
+    }
+
+    ESP_LOGI(TAG, "POST Content:\n%s", content);
+
+    // extract ca_cert from the output
+    char *ca_cert = (char *)malloc(MAX_CA_CERT_SIZE);
+    // Extract the certificate
+    int cert_length = extract_param_value(content, "ca_cert=", ca_cert, MAX_CA_CERT_SIZE);
+    if (cert_length <= 0) {
+        ESP_LOGE(TAG, "Failed to extract CA certificate from the received data");
+        free(content);
+        free(ca_cert);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to extract certificate");
+        return ESP_FAIL;
+    }
+
+    // Decode the URL-encoded certificate
+    url_decode(ca_cert);
+
+    // Null-terminate the decoded certificate
+    str_trunc_after(ca_cert, "-----END CERTIFICATE-----");
+
+    // Save the certificate
+    esp_err_t err = save_ca_certificate(ca_cert);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save CA certificate");
+        free(content);
+        free(ca_cert);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save certificate");
+        return ESP_FAIL;
+    }
+
+    free(content);
+    free(ca_cert); // Free the allocated memory after saving
+    // Send a response indicating success
+    httpd_resp_sendstr(req, success_html);
+    ESP_LOGI(TAG, "CA certificate saved successfully");
 
     return ESP_OK;
 }
