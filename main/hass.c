@@ -629,6 +629,14 @@ esp_err_t ha_entity_discovery_print(ha_entity_discovery_t *discovery) {
     ESP_LOGI(TAG, "- state_topic: %s", discovery->state_topic);
     ESP_LOGI(TAG, "- unique_id: %s", discovery->unique_id);
     ESP_LOGI(TAG, "- value_template: %s", discovery->value_template);
+    ESP_LOGI(TAG, "- state_class: %s", discovery->state_class);
+    ESP_LOGI(TAG, "- unit_of_measurement: %s", discovery->unit_of_measurement);
+    /* Uncomment if command topic and payloads are used in the future
+    ESP_LOGI(TAG, "- command_topic: %s", discovery->command_topic);
+    ESP_LOGI(TAG, "- payload_on: %s", discovery->payload_on ? "true" : "false");
+    ESP_LOGI(TAG, "- payload_off: %s", discovery->payload_off ? "true" : "false");
+    */
+    ESP_LOGI(TAG, "- optimistic: %s", discovery->optimistic ? "true" : "false");
 
     // print availability
     if (discovery->availability != NULL) {
@@ -678,6 +686,8 @@ cJSON *ha_entity_discovery_to_JSON(ha_entity_discovery_t *discovery) {
     */
     cJSON_AddBoolToObject(root, "optimistic", discovery->optimistic);
     cJSON_AddStringToObject(root, "name", discovery->name);
+    cJSON_AddStringToObject(root, "state_class", discovery->state_class);
+    cJSON_AddStringToObject(root, "unit_of_measurement", discovery->unit_of_measurement);
 
     return root;
 }
