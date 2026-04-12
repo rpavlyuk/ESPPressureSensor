@@ -1,9 +1,13 @@
 #ifndef SENSOR_H
 #define SENSOR_H
 
+#include "cJSON.h"
+
 #include "esp_adc/adc_oneshot.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
+
+#include "status.h"
 
 #define PRESSURE_SENSOR_PIN     ADC_CHANNEL_3           // GPIO3 corresponds to ADC_CHANNEL_3 on the ESP32-C6
 #define ADC_WIDTH               ADC_WIDTH_BIT_12        // 12-bit ADC width for higher resolution
@@ -30,5 +34,12 @@ int calculate_median(int* data, int size);
 float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_unit_handle_t adc1_handle, adc_channel_t channel, bool do_calibration1_pressure_sensor);
 
 void sensor_run(void *pvParameters);
+
+cJSON *sensor_state_to_JSON(sensor_data_t *s_data);
+char *serialize_sensor_state(sensor_data_t *sensor_data);
+cJSON *sensor_status_to_JSON(sensor_status_t *s_data);
+char *serialize_sensor_status(sensor_status_t *s_data);
+cJSON *sensor_all_to_JSON(sensor_status_t *status, sensor_data_t *sensor);
+char *serialize_all_device_data(sensor_status_t *status, sensor_data_t *sensor);
 
 #endif

@@ -88,7 +88,7 @@ extern int device_ready;
 #define S_DEFAULT_DEVICE_ID         ""
 #define S_DEFAULT_DEVICE_SERIAL     ""
 
-#define S_DEFAULT_MQTT_CONNECT      MQTT_SENSOR_MODE_DISABLE
+#define S_DEFAULT_MQTT_CONNECT      MQTT_CONN_MODE_DISABLE
 #define S_DEFAULT_MQTT_SERVER       "127.0.0.1"
 #define S_DEFAULT_MQTT_PORT         1883
 #define S_DEFAULT_MQTT_PROTOCOL     "mqtt"
@@ -107,6 +107,13 @@ extern int device_ready;
 #define S_DEFAULT_SENSOR_SAMPLING_INTERVAL              10  // Interval between samples in milliseconds
 #define S_DEFAULT_SENSOR_SAMPLING_MEDIAN_DEVIATION      10  // Threshold percentage for filtering
 
+
+/**
+ * Paths
+ */
+
+#define CA_CERT_PATH_MQTTS  "/spiffs/ca-mqtts.crt"
+#define CA_CERT_PATH_HTTPS  "/spiffs/ca-https.crt"
 
 /**
  * Routines

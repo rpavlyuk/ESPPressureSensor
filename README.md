@@ -19,7 +19,7 @@ To get started, you will need:
   - ESP32-C6 or ESP32-S3 microcontroller (both have been tested).
   - DFRobot SEN0257 pressure sensor.
 - **Software**:
-  - ESP-IDF framework (version 4.4 or higher recommended).
+  - ESP-IDF framework (version 5.5 or higher, v6.0 is recommended).
 
 ## Wiring
 The following wiring schema is expected by default:

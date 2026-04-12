@@ -7,6 +7,8 @@
 #include "esp_http_server.h"
 #include "non_volatile_storage.h"
 
+#include "ca_cert_manager.h"
+
 #include "common.h"
 #include "settings.h"
 #include "sensor.h"
@@ -195,11 +197,11 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
 
     // Load the CA certificate
-    if (load_ca_certificate(&ca_cert) != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to load CA certificate from %s", CA_CERT_PATH);
+    if (load_ca_certificate(&ca_cert, CA_CERT_PATH_MQTTS) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load CA certificate from %s", CA_CERT_PATH_MQTTS);
         return ESP_FAIL;
     } else {
-        ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH);
+        ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH_MQTTS);
     }
 
     // Replace placeholders in the template with actual values
@@ -450,11 +452,11 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
 
     // Load the CA certificate
-    if (load_ca_certificate(&ca_cert) != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to load CA certificate from %s", CA_CERT_PATH);
+    if (load_ca_certificate(&ca_cert, CA_CERT_PATH_MQTTS) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load CA certificate from %s", CA_CERT_PATH_MQTTS);
         return ESP_FAIL;
     } else {
-        ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH);
+        ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH_MQTTS);
     }
 
     // Replace placeholders in the template with actual values
@@ -876,7 +878,7 @@ static esp_err_t ca_cert_post_handler(httpd_req_t *req) {
     str_trunc_after(ca_cert, "-----END CERTIFICATE-----");
 
     // Save the certificate
-    esp_err_t err = save_ca_certificate(ca_cert);
+    esp_err_t err = save_ca_certificate(ca_cert, CA_CERT_PATH_MQTTS, true);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save CA certificate");
         free(content);

@@ -14,3 +14,20 @@ set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 # SPIFFS flash
 # create SPIFF partition
 spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT)
+
+# Define the major version
+set(MAJOR_VERSION "1.2.0")
+
+# Find Python interpreter
+find_package(Python3 REQUIRED)
+
+# Add a custom target to run the make_version.py script
+add_custom_target(
+    make_version ALL
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/util/make_version.py ${CMAKE_SOURCE_DIR} ${MAJOR_VERSION}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running make_version.py script"
+)
+
+# Ensure that make_version runs before building the app
+add_dependencies(app make_version)

@@ -5,22 +5,31 @@
 #include "mqtt_client.h"
 #include "sensor.h"
 
+#define MQTT_QOS_DEFAULT    0
+#define MQTT_QOS_SUBSCRIBE  1
+#define MQTT_QOS_PUBLISH  MQTT_QOS_DEFAULT
+
+/* Macro to check if MQTT is connected */
+#define IS_MQTT_CONNECTED() \
+    ((xEventGroupGetBits(g_sys_events) & BIT_MQTT_CONNECTED) != 0)
+
+#define IS_MQTT_READY() \
+    ((xEventGroupGetBits(g_sys_events) & (BIT_MQTT_CONNECTED | BIT_MQTT_READY)) == \
+     (BIT_MQTT_CONNECTED | BIT_MQTT_READY))
+
+/**
+ * @brief: MQTT connection mode for the device
+ */
 typedef enum {
-    MQTT_SENSOR_MODE_DISABLE,           // soft disable MQTT
-    MQTT_SENSOR_MODE_NO_RECONNECT,      // connect initially to MQTT, but do NOT reconnect
-    MQTT_SENSOR_MODE_AUTOCONNECT,       // connect initially to MQTT and reconnect when lost
+    MQTT_CONN_MODE_DISABLE = 0,           // soft disable MQTT
+    MQTT_CONN_MODE_NO_RECONNECT,      // connect initially to MQTT, but do NOT reconnect
+    MQTT_CONN_MODE_AUTOCONNECT,       // connect initially to MQTT and reconnect when lost
 } mqtt_connection_mode_t;
 
 // Define the SPIFFS configuration
 #define CA_CERT_PATH "/spiffs/ca.crt"
 
 static void log_error_if_nonzero(const char *message, int error_code);
-
-// load CA certification from the filesystem
-esp_err_t load_ca_certificate(char **ca_cert);
-
-// save CA certification to the filesystem
-esp_err_t save_ca_certificate(const char *ca_cert);
 
 // MQTT Event loop handler
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);

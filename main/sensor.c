@@ -6,6 +6,8 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 
+#include "cJSON.h"
+
 #include <math.h>
 
 #include "common.h"
@@ -160,7 +162,7 @@ void sensor_run(void *pvParameters) {
 
         uint16_t mqtt_connection_mode;
         ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
-        if (mqtt_connection_mode > MQTT_SENSOR_MODE_DISABLE) {
+        if (mqtt_connection_mode > (uint16_t)MQTT_CONN_MODE_DISABLE) {
             ESP_LOGD(TAG, "Sensor Run - Before MQTT::Publish - Free Stack Space: %d", uxTaskGetStackHighWaterMark(NULL));
 
             // Publish the sensor data via MQTT
@@ -255,4 +257,129 @@ float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_uni
     }
 
     return average_voltage;
+}
+
+
+
+/**
+ * @brief: Get CJSON object of sensor_data_t
+ */
+cJSON *sensor_state_to_JSON(sensor_data_t *s_data) {
+
+   cJSON *root = cJSON_CreateObject();
+
+    cJSON *j_pressure = cJSON_CreateNumber(s_data->pressure);
+    if (j_pressure != NULL) {
+        cJSON_AddItemToObject(root, "pressure", j_pressure);
+    }
+
+    cJSON *j_voltage = cJSON_CreateNumber(s_data->voltage);
+    if (j_voltage != NULL) {
+        cJSON_AddItemToObject(root, "voltage", j_voltage);
+    }
+
+    cJSON *j_voltage_offset = cJSON_CreateNumber(s_data->voltage_offset);
+    if (j_voltage_offset != NULL) {
+        cJSON_AddItemToObject(root, "voltage_offset", j_voltage_offset);
+    }
+
+    cJSON *j_sensor_linear_multiplier = cJSON_CreateNumber(s_data->sensor_linear_multiplier);
+    if (j_sensor_linear_multiplier != NULL) {
+        cJSON_AddItemToObject(root, "sensor_linear_multiplier", j_sensor_linear_multiplier);
+    }
+
+    cJSON *j_voltage_raw = cJSON_CreateNumber(s_data->voltage_raw);
+    if (j_voltage_raw != NULL) {
+        cJSON_AddItemToObject(root, "voltage_raw", j_voltage_raw);
+    }
+
+    return root;
+}
+
+/**
+ * @brief: Serialize pressure sensor data to JSON
+ *
+ */
+char *serialize_sensor_state(sensor_data_t *s_data) {
+    char *json = NULL;
+
+    // Debugging: Print sensor data before serializing
+    /*
+    ESP_LOGD(TAG, "Data for the serialization (in function): Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
+             s_data->voltage_raw, s_data->voltage, s_data->pressure);
+    */
+
+    cJSON *c_json = sensor_state_to_JSON(s_data);
+    json = cJSON_Print(c_json);
+    cJSON_Delete(c_json);
+    return json;
+}
+
+
+/**
+ * @brief: Get CJSON object of sensor_status_t
+ */
+cJSON *sensor_status_to_JSON(sensor_status_t *s_data) {
+
+    cJSON *root = cJSON_CreateObject();
+
+    cJSON *j_free_heap = cJSON_CreateNumber(s_data->free_heap);
+    if (j_free_heap != NULL) {
+        cJSON_AddItemToObject(root, "free_heap", j_free_heap);
+    }
+
+    cJSON *j_min_free_heap = cJSON_CreateNumber(s_data->min_free_heap);
+    if (j_min_free_heap != NULL) {
+        cJSON_AddItemToObject(root, "min_free_heap", j_min_free_heap);
+    }
+
+    cJSON *j_time_since_boot = cJSON_CreateNumber(s_data->time_since_boot);
+    if (j_time_since_boot != NULL) {
+        cJSON_AddItemToObject(root, "time_since_boot", j_time_since_boot);
+    }
+
+    return root;
+
+}
+
+/**
+ * @brief: Serialize sensor status information to JSON string
+ */
+char *serialize_sensor_status(sensor_status_t *s_data) {
+
+    char *json = NULL;
+    cJSON *c_json = sensor_status_to_JSON(s_data);
+
+    json = cJSON_Print(c_json);
+    cJSON_Delete(c_json);
+    return json;
+
+}
+
+/**
+ * @brief: Compile JSON object from sensor state and device status 
+ */
+cJSON *sensor_all_to_JSON(sensor_status_t *status, sensor_data_t *sensor) {
+
+    cJSON *root = cJSON_CreateObject();
+
+    cJSON_AddItemToObject(root, "sensor", sensor_state_to_JSON(sensor));
+    cJSON_AddItemToObject(root, "status", sensor_status_to_JSON(status));
+
+    return root;
+
+}
+
+/**
+ * @brief: Serialize all device data (sensor, status) to JSON
+ */
+char *serialize_all_device_data(sensor_status_t *status, sensor_data_t *sensor) {
+
+    char *json = NULL;
+    cJSON *c_json = sensor_all_to_JSON(status, sensor);
+
+    json = cJSON_Print(c_json);
+    cJSON_Delete(c_json);
+    return json;
+
 }

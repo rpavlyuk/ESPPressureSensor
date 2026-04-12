@@ -3,14 +3,21 @@
 #include "esp_wifi.h"
 #include "cJSON.h"
 
+#include "version.h"
 #include "wifi.h"
 #include "hass.h"
 #include "non_volatile_storage.h"
 #include "settings.h"
 #include "status.h"
+#include "sensor.h"
+
 
 /**
  * @brief: Initialize the device entity
+ * 
+ * @param device: Pointer to the device entity
+ * 
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if device is NULL, ESP_ERR_NO_MEM if memory allocation fails
  */
 esp_err_t ha_device_init(ha_device_t *device) {
     if (device == NULL) {
@@ -72,6 +79,20 @@ esp_err_t ha_device_init(ha_device_t *device) {
     }
     ESP_LOGD(TAG, "DEVICE: assigned via_device: %s", device->via_device);
 
+    // Assign sw_version
+    device->sw_version = strdup(DEVICE_SW_VERSION);
+    if (device->sw_version == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for sw_version");
+        free(device->manufacturer);
+        free(device->model);
+        free(device->configuration_url);
+        free(device->name);
+        free(device->via_device);
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGD(TAG, "DEVICE: assigned sw_version: %s", device->via_device);
+
+
     // Assign identifiers[0]
     device->identifiers[0] = NULL;
     err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device->identifiers[0]);
@@ -82,6 +103,7 @@ esp_err_t ha_device_init(ha_device_t *device) {
         free(device->configuration_url);
         free(device->name);
         free(device->via_device);
+        free(device->sw_version);
         return err;
     }
     ESP_LOGD(TAG, "DEVICE: assigned identifiers[0]: %s", device->identifiers[0]);
@@ -99,6 +121,7 @@ esp_err_t ha_device_free(ha_device_t *device) {
         free(device->configuration_url);
         free(device->name);
         free(device->via_device);
+        free(device->sw_version);
         free(device->identifiers[0]);  // Assuming only 1 identifier
         free(device);
     }
@@ -117,8 +140,9 @@ cJSON *ha_device_to_JSON(ha_device_t *device) {
     cJSON_AddStringToObject(root, "model", device->model);
     cJSON_AddStringToObject(root, "name", device->name);
     cJSON_AddStringToObject(root, "via_device", device->via_device);
+    cJSON_AddStringToObject(root, "sw_version", device->sw_version);
     if (device->identifiers[0]) {
-        cJSON_AddItemToObject(root, "identifiers", cJSON_CreateStringArray(device->identifiers, 1));
+        cJSON_AddItemToObject(root, "identifiers", cJSON_CreateStringArray((const char *const *)device->identifiers, 1));
     }
 
     return root;
@@ -138,12 +162,13 @@ char *ha_device_to_string(ha_device_t *device) {
     sprintf(ident, "[ %s ]", device->identifiers[0] ? device->identifiers[0] : "");
 
 
-    sprintf(buf, "> DEVICE:\n- manufacturer: %s\n-model: %s\n-name: %s\n-via_device: %s\n-configuration_url: %s\n-identifiers: %s",
+    sprintf(buf, "> DEVICE:\n- manufacturer: %s\n-model: %s\n-name: %s\n-via_device: %s\n-configuration_url: %s\n- sw_version:%s\n-identifiers: %s",
                     device->manufacturer, 
                     device->model,
                     device->name,
                     device->via_device,
                     device->configuration_url,
+                    device->sw_version,
                     ident
                 );   
 
@@ -190,6 +215,10 @@ esp_err_t ha_availability_init(ha_entity_availability_t *availability) {
     snprintf(availability->topic, topic_len, "%s/%s/%s", mqtt_prefix, device_id, HA_DEVICE_STATUS_PATH);
     ESP_LOGD(TAG, "DISCOVERY::AVAILABILITY: assigned availability topic: %s", availability->topic);
 
+    // value template
+    availability->value_template = strdup(HA_DEVICE_AVAILABILITY_VAL_TPL);
+    ESP_LOGD(TAG, "DISCOVERY::AVAILABILITY: assigned availability value template: %s", availability->value_template);
+
     // Clean up temporary variables
     free(mqtt_prefix);
     free(device_id);
@@ -204,6 +233,7 @@ esp_err_t ha_availability_free(ha_entity_availability_t *availability) {
 
     if (availability != NULL) {
         free(availability->topic);  // Free the availability topic
+        free(availability->value_template);
         free(availability);
     }
 
@@ -216,6 +246,7 @@ esp_err_t ha_availability_free(ha_entity_availability_t *availability) {
 cJSON *ha_availability_to_JSON(ha_entity_availability_t *availability) {
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "topic", availability->topic);
+    cJSON_AddStringToObject(root, "value_template", availability->value_template);
     return root;
 }
 
@@ -254,7 +285,6 @@ esp_err_t ha_origin_init(ha_entity_origin_t *origin) {
     ESP_LOGD(TAG, "Origin initialized: name=%s, url=%s, sw=%s", origin->name, origin->url, origin->sw);
     return ESP_OK;
 }
-
 
 /**
  * @brief: Destroy the device origin entity and free up memory
@@ -326,6 +356,7 @@ esp_err_t ha_entity_discovery_init(ha_entity_discovery_t *discovery) {
     ESP_LOGD(TAG, "DISCOVERY::DEVICE: manufacturer: %s", discovery->device->manufacturer);
     ESP_LOGD(TAG, "DISCOVERY::DEVICE: model: %s", discovery->device->model);
     ESP_LOGD(TAG, "DISCOVERY::DEVICE: name: %s", discovery->device->name);
+    ESP_LOGD(TAG, "DISCOVERY::DEVICE: sw_version: %s", discovery->device->sw_version);
     ESP_LOGD(TAG, "DISCOVERY::DEVICE: configuration_url: %s", discovery->device->configuration_url);
     ESP_LOGD(TAG, "DISCOVERY::DEVICE: via_device: %s", discovery->device->via_device);
     ESP_LOGD(TAG, "DISCOVERY::DEVICE: identifiers[0]: %s", discovery->device->identifiers[0]);
@@ -353,60 +384,8 @@ esp_err_t ha_entity_discovery_init(ha_entity_discovery_t *discovery) {
     ESP_LOGD(TAG, "DISCOVERY::ORIGIN: sw: %s", discovery->origin->sw);
     ESP_LOGD(TAG, "DISCOVERY::ORIGIN: url: %s", discovery->origin->url);
 
-    // Allocate and read MQTT prefix and device ID from NVS
-    char *mqtt_prefix = NULL;
-    char *device_id = NULL;
-
-    err = nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read MQTT prefix from NVS");
-        free(discovery->availability);
-        free(discovery->device);
-        free(discovery->origin);
-        return err;
-    }
-
-    err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read device ID from NVS");
-        free(discovery->availability);
-        free(discovery->device);
-        free(discovery->origin);
-        return err;
-    }
-
     // Initialize discovery fields
     discovery->enabled_by_default = true;
-    size_t topic_len = strlen(mqtt_prefix) + strlen(device_id) + strlen(HA_DEVICE_STATE_PATH) + 3;  // for slashes and null terminator
-
-    discovery->json_attributes_topic = (char *)malloc(topic_len);
-    if (discovery->json_attributes_topic == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for JSON attributes topic");
-        free(discovery->availability);
-        free(discovery->device);
-        free(discovery->origin);
-        free(mqtt_prefix);
-        free(device_id);
-        return ESP_ERR_NO_MEM;
-    }
-    snprintf(discovery->json_attributes_topic, topic_len, "%s/%s/%s", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH);
-
-    discovery->state_topic = (char *)malloc(topic_len);
-    if (discovery->state_topic == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for state topic");
-        free(discovery->availability);
-        free(discovery->device);
-        free(discovery->origin);
-        free(discovery->json_attributes_topic);
-        free(mqtt_prefix);
-        free(device_id);
-        return ESP_ERR_NO_MEM;
-    }
-    snprintf(discovery->state_topic, topic_len, "%s/%s/%s", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH);
-
-    // Cleanup temporary variables
-    free(mqtt_prefix);
-    free(device_id);
 
     return ESP_OK;
 }
@@ -415,6 +394,7 @@ esp_err_t ha_entity_discovery_init(ha_entity_discovery_t *discovery) {
  * @brief: Fulfills extended entity discovery for a specified metric and device class
  */
 esp_err_t ha_entity_discovery_fullfill(ha_entity_discovery_t *discovery, const char* metric, const char* unit, const char* device_class, const char* state_class) {
+
     if (discovery == NULL || metric == NULL || unit == NULL || device_class == NULL) {
         ESP_LOGE(TAG, "Invalid argument(s) passed to ha_entity_discovery_fullfill");
         return ESP_ERR_INVALID_ARG;
@@ -520,6 +500,12 @@ esp_err_t ha_entity_discovery_free(ha_entity_discovery_t *discovery) {
         free(discovery->unique_id);
         free(discovery->value_template);
 
+        if (discovery->command_topic != NULL) {
+            free(discovery->command_topic);
+        }
+
+        free(discovery->name);
+
         // free(discovery);  // Finally, free the discovery struct itself
     }
 
@@ -540,14 +526,20 @@ cJSON *ha_entity_discovery_to_JSON(ha_entity_discovery_t *discovery) {
     cJSON_AddItemToObject(root, "availability", availability_array);
 
     cJSON_AddStringToObject(root, "device_class", discovery->device_class);
-    cJSON_AddBoolToObject(root, "enabled_by_default", &discovery->enabled_by_default);
+    cJSON_AddBoolToObject(root, "enabled_by_default", discovery->enabled_by_default);
     cJSON_AddStringToObject(root, "json_attributes_topic", discovery->json_attributes_topic);
     cJSON_AddStringToObject(root, "object_id", discovery->object_id);
-    cJSON_AddStringToObject(root, "state_class", discovery->state_class);
     cJSON_AddStringToObject(root, "state_topic", discovery->state_topic);
     cJSON_AddStringToObject(root, "unique_id", discovery->unique_id);
-    cJSON_AddStringToObject(root, "unit_of_measurement", discovery->unit_of_measurement);
     cJSON_AddStringToObject(root, "value_template", discovery->value_template);
+
+    if (discovery->command_topic != NULL) {
+        cJSON_AddStringToObject(root, "command_topic", discovery->command_topic);
+    }
+    cJSON_AddBoolToObject(root, "payload_on", discovery->payload_on);
+    cJSON_AddBoolToObject(root, "payload_off", discovery->payload_off);
+    cJSON_AddBoolToObject(root, "optimistic", discovery->optimistic);
+    cJSON_AddStringToObject(root, "name", discovery->name);
 
     return root;
 }
@@ -557,132 +549,29 @@ cJSON *ha_entity_discovery_to_JSON(ha_entity_discovery_t *discovery) {
  */
 char* ha_entity_discovery_print_JSON(ha_entity_discovery_t *discovery) {
     cJSON *j_entity_discovery = ha_entity_discovery_to_JSON(discovery);
-    char *json = NULL;
-    json = cJSON_Print(j_entity_discovery);
+    char *json = cJSON_Print(j_entity_discovery);
     cJSON_Delete(j_entity_discovery);
     return json;
 }
 
-
 /**
- * @brief: Get CJSON object of sensor_data_t
+ * @brief: Creates basic availability notification entry
  */
-cJSON *sensor_state_to_JSON(sensor_data_t *s_data) {
-
-   cJSON *root = cJSON_CreateObject();
-
-    cJSON *j_pressure = cJSON_CreateNumber(s_data->pressure);
-    if (j_pressure != NULL) {
-        cJSON_AddItemToObject(root, "pressure", j_pressure);
-    }
-
-    cJSON *j_voltage = cJSON_CreateNumber(s_data->voltage);
-    if (j_voltage != NULL) {
-        cJSON_AddItemToObject(root, "voltage", j_voltage);
-    }
-
-    cJSON *j_voltage_offset = cJSON_CreateNumber(s_data->voltage_offset);
-    if (j_voltage_offset != NULL) {
-        cJSON_AddItemToObject(root, "voltage_offset", j_voltage_offset);
-    }
-
-    cJSON *j_sensor_linear_multiplier = cJSON_CreateNumber(s_data->sensor_linear_multiplier);
-    if (j_sensor_linear_multiplier != NULL) {
-        cJSON_AddItemToObject(root, "sensor_linear_multiplier", j_sensor_linear_multiplier);
-    }
-
-    cJSON *j_voltage_raw = cJSON_CreateNumber(s_data->voltage_raw);
-    if (j_voltage_raw != NULL) {
-        cJSON_AddItemToObject(root, "voltage_raw", j_voltage_raw);
-    }
-
-    return root;
-}
-
-/**
- * @brief: Serialize pressure sensor data to JSON
- *
- */
-char *serialize_sensor_state(sensor_data_t *s_data) {
-    char *json = NULL;
-
-    // Debugging: Print sensor data before serializing
-    /*
-    ESP_LOGD(TAG, "Data for the serialization (in function): Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
-             s_data->voltage_raw, s_data->voltage, s_data->pressure);
-    */
-
-    cJSON *c_json = sensor_state_to_JSON(s_data);
-    json = cJSON_Print(c_json);
-    cJSON_Delete(c_json);
-    return json;
-}
-
-
-/**
- * @brief: Get CJSON object of sensor_status_t
- */
-cJSON *sensor_status_to_JSON(sensor_status_t *s_data) {
-
+cJSON *ha_availability_entry_to_JSON(const char *state) {
     cJSON *root = cJSON_CreateObject();
-
-    cJSON *j_free_heap = cJSON_CreateNumber(s_data->free_heap);
-    if (j_free_heap != NULL) {
-        cJSON_AddItemToObject(root, "free_heap", j_free_heap);
-    }
-
-    cJSON *j_min_free_heap = cJSON_CreateNumber(s_data->min_free_heap);
-    if (j_min_free_heap != NULL) {
-        cJSON_AddItemToObject(root, "min_free_heap", j_min_free_heap);
-    }
-
-    cJSON *j_time_since_boot = cJSON_CreateNumber(s_data->time_since_boot);
-    if (j_time_since_boot != NULL) {
-        cJSON_AddItemToObject(root, "time_since_boot", j_time_since_boot);
-    }
+    cJSON_AddStringToObject(root, "state", state);
 
     return root;
-
 }
 
 /**
- * @brief: Serialize sensor status information to JSON string
+ * @brief: Print JSON text of the basic availability notification entry
  */
-char *serialize_sensor_status(sensor_status_t *s_data) {
-
+char* ha_availability_entry_print_JSON(const char *state) {
+    cJSON *j_availability = ha_availability_entry_to_JSON(state);
     char *json = NULL;
-    cJSON *c_json = sensor_state_to_JSON(s_data);
-
-    json = cJSON_Print(c_json);
-    cJSON_Delete(c_json);
+    json = cJSON_Print(j_availability);
+    cJSON_Delete(j_availability);
     return json;
-
 }
 
-/**
- * @brief: Compile JSON object from sensor state and device status 
- */
-cJSON *sensor_all_to_JSON(sensor_status_t *status, sensor_data_t *sensor) {
-
-    cJSON *root = cJSON_CreateObject();
-
-    cJSON_AddItemToObject(root, "sensor", sensor_state_to_JSON(sensor));
-    cJSON_AddItemToObject(root, "status", sensor_status_to_JSON(status));
-
-    return root;
-
-}
-
-/**
- * @brief: Serialize all device data (sensor, status) to JSON
- */
-char *serialize_all_device_data(sensor_status_t *status, sensor_data_t *sensor) {
-
-    char *json = NULL;
-    cJSON *c_json = sensor_all_to_JSON(status, sensor);
-
-    json = cJSON_Print(c_json);
-    cJSON_Delete(c_json);
-    return json;
-
-}

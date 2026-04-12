@@ -6,7 +6,10 @@
 #include "mqtt_client.h"
 #include "esp_check.h"
 
+#include "ca_cert_manager.h"
+
 #include "settings.h"
+#include "flags.h"
 #include "wifi.h"
 #include "sensor.h"  // To access the sensor_data
 #include "hass.h"
@@ -20,70 +23,6 @@ static void log_error_if_nonzero(const char *message, int error_code)
     if (error_code != 0) {
         ESP_LOGE(TAG, "Last error %s: 0x%x", message, error_code);
     }
-}
-
-esp_err_t load_ca_certificate(char **ca_cert)
-{
-    FILE *f = fopen(CA_CERT_PATH, "r");
-    if (f == NULL) {
-        ESP_LOGE(TAG, "Failed to open CA certificate file");
-        return ESP_FAIL;
-    }
-
-    // Seek to the end to find the file size
-    fseek(f, 0, SEEK_END);
-    long cert_size = ftell(f);
-    fseek(f, 0, SEEK_SET);  // Go back to the beginning of the file
-
-    if (cert_size <= 0) {
-        ESP_LOGE(TAG, "Invalid CA certificate file size");
-        fclose(f);
-        return ESP_FAIL;
-    }
-
-    // Allocate memory for the certificate
-    *ca_cert = (char *) malloc(cert_size + 1);  // +1 for the null terminator
-    if (*ca_cert == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for CA certificate");
-        fclose(f);
-        return ESP_ERR_NO_MEM;
-    }
-
-    // Read the certificate into the buffer
-    fread(*ca_cert, 1, cert_size, f);
-    (*ca_cert)[cert_size] = '\0';  // Null-terminate the string
-
-    fclose(f);
-    ESP_LOGI(TAG, "Successfully loaded CA certificate");
-
-    return ESP_OK;
-}
-
-esp_err_t save_ca_certificate(const char *ca_cert)
-{
-    if (ca_cert == NULL) {
-        ESP_LOGE(TAG, "CA certificate data is NULL");
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    FILE *f = fopen(CA_CERT_PATH, "w");
-    if (f == NULL) {
-        ESP_LOGE(TAG, "Failed to open CA certificate file for writing");
-        return ESP_FAIL;
-    }
-
-    // Write the certificate to the file
-    size_t written = fwrite(ca_cert, 1, strlen(ca_cert), f);
-    if (written != strlen(ca_cert)) {
-        ESP_LOGE(TAG, "Failed to write entire CA certificate to file");
-        fclose(f);
-        return ESP_FAIL;
-    }
-
-    fclose(f);
-    ESP_LOGI(TAG, "Successfully saved CA certificate");
-
-    return ESP_OK;
 }
 
 /*
@@ -144,20 +83,38 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-// Function to initialize the MQTT client
+/**
+ * @brief Initialize the MQTT client.
+ * 
+ * This function initializes the MQTT client with the configuration parameters
+ * stored in NVS. The function reads the MQTT server, port, protocol, username,
+ * password, and prefix from NVS and uses them to configure the MQTT client.
+ * 
+ * @return esp_err_t    ESP_OK on success, ESP_FAIL if the MQTT client cannot be initialized.
+ * 
+ */
 esp_err_t mqtt_init(void) {
     
     uint16_t mqtt_connection_mode;
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
-    if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+    if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
         ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
         return ESP_OK; // not an issue
     }
 
-    // wait for Wi-Fi to connect
-    while(!g_wifi_ready) {
-        ESP_LOGI(TAG, "Waiting for Wi-Fi/network to become ready...");
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    EventBits_t bits = xEventGroupWaitBits(
+        g_sys_events,
+        BIT_WIFI_CONNECTED,
+        pdFALSE,                // don't clear
+        pdTRUE,
+        pdMS_TO_TICKS(30000)    // wait up to 30 seconds
+    );
+
+    if (bits & BIT_WIFI_CONNECTED) {
+        ESP_LOGI(TAG, "Wi-Fi/network is ready!");
+    } else {
+        ESP_LOGW(TAG, "Timeout waiting for Wi-Fi to connect");
+        return ESP_FAIL;
     }
 
     // Proceed with MQTT connection
@@ -196,14 +153,14 @@ esp_err_t mqtt_init(void) {
     if (strcmp(mqtt_protocol,"mqtts") == 0) {
         // Load the CA certificate
         char *ca_cert = NULL;
-        if (load_ca_certificate(&ca_cert) != ESP_OK) {
+        if (load_ca_certificate(&ca_cert, CA_CERT_PATH_MQTTS) != ESP_OK) {
             ESP_LOGW(TAG, "Failed to load CA certificate");
             if (strcmp(mqtt_protocol,"mqtts") == 0) {
                 ESP_LOGE(TAG, "MQTTS protocol cannot be managed without CA certificate.");
                 return ESP_FAIL;
             }
         } else {
-            ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH);
+            ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH_MQTTS);
         }
         if (ca_cert) {
             mqtt_cfg.broker.verification.certificate = ca_cert;
@@ -212,7 +169,7 @@ esp_err_t mqtt_init(void) {
 
     esp_err_t ret;
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
-    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+    ESP_ERROR_CHECK(esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL));
     ret = esp_mqtt_client_start(mqtt_client);
     free(mqtt_server);
     free(mqtt_protocol);
@@ -220,6 +177,25 @@ esp_err_t mqtt_init(void) {
     free(mqtt_password);
     free(mqtt_prefix);
     free(device_id);
+
+    // 🟢 Wait up to 10 seconds for MQTT to become fully ready
+    ESP_LOGI(TAG, "Waiting for MQTT client to connect...");
+
+    bits = xEventGroupWaitBits(
+        g_sys_events,
+        BIT_MQTT_CONNECTED | BIT_MQTT_READY,  // wait for both
+        pdFALSE,                              // don’t clear bits
+        pdTRUE,                               // wait for *all* bits
+        pdMS_TO_TICKS(10000)                  // timeout 10 seconds
+    );
+
+    if ((bits & (BIT_MQTT_CONNECTED | BIT_MQTT_READY)) ==
+        (BIT_MQTT_CONNECTED | BIT_MQTT_READY)) {
+        ESP_LOGI(TAG, "MQTT is connected and ready!");
+    } else {
+        ESP_LOGE(TAG, "Timeout waiting for MQTT to connect/initialize");
+        ret = ESP_FAIL;
+    }
 
     return ret;
 }
@@ -238,7 +214,7 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     }
 
     // Check if MQTT is disabled in the device settings
-    if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+    if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
         ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
         return ESP_OK;
     }
@@ -246,7 +222,7 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     // Ensure MQTT client is initialized and connected
     if (mqtt_client == NULL || !mqtt_connected) {
         ESP_LOGW(TAG, "MQTT client is not initialized or not connected.");
-        if (mqtt_connection_mode > (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+        if (mqtt_connection_mode > (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
             ESP_LOGI(TAG, "Restoring connection to MQTT...");
             if (mqtt_init() != ESP_OK) {
                 ESP_LOGE(TAG, "MQTT client re-init failed. Will not publish any data to MQTT.");
@@ -372,7 +348,7 @@ void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_
     
     uint16_t mqtt_connection_mode;
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
-    if (mqtt_connection_mode < (uint16_t)MQTT_SENSOR_MODE_NO_RECONNECT) {
+    if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
         ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
         return;
     }
