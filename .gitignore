@@ -113,3 +113,4 @@ XUNIT_RESULT*.xml
 # Local SDK configuration files
 sdkconfig.old
 sdkconfig.bak
+main/version.h
