@@ -69,6 +69,7 @@ test_multi_heap_host
 
 # VS Code Settings
 .vscode/
+.vscode
 
 # VIM files
 *.swp
@@ -108,3 +109,7 @@ XUNIT_RESULT*.xml
 
 # Vale
 .vale/styles/*
+
+# Local SDK configuration files
+sdkconfig.old
+sdkconfig.bak
