@@ -25,7 +25,7 @@ static void log_error_if_nonzero(const char *message, int error_code)
     }
 }
 
-/*
+/**
  * @brief Event handler registered to receive MQTT events
  *
  *  This function is called by the MQTT client event loop.
@@ -45,12 +45,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     */
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         mqtt_connected = true;  // Set flag when connected
+        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        xEventGroupSetBits(g_sys_events, BIT_MQTT_CONNECTED);
+        xEventGroupSetBits(g_sys_events, BIT_MQTT_READY);
         break;
     case MQTT_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
         mqtt_connected = false;  // Reset flag when disconnected
+        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        xEventGroupClearBits(g_sys_events, BIT_MQTT_CONNECTED);
+        xEventGroupClearBits(g_sys_events, BIT_MQTT_READY);
         cleanup_mqtt();  // Ensure proper cleanup on disconnection
         break;
     case MQTT_EVENT_SUBSCRIBED:
@@ -75,6 +79,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             log_error_if_nonzero("captured as transport's socket errno",  event->error_handle->esp_transport_sock_errno);
             ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
         }
+        xEventGroupClearBits(g_sys_events, BIT_MQTT_CONNECTED | BIT_MQTT_READY);
         mqtt_connected = false;  // Handle connection error
         break;
     default:
@@ -209,29 +214,33 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     // Read MQTT connection mode
     err = nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read MQTT connection mode from NVS");
+        ESP_LOGE(TAG, "%s: Failed to read MQTT connection mode from NVS", __func__);
         return ESP_FAIL;
     }
 
     // Check if MQTT is disabled in the device settings
     if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
-        ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
+        ESP_LOGW(TAG, "%s: MQTT disabled in device settings. Publishing skipped.", __func__);
         return ESP_OK;
     }
 
-    // Ensure MQTT client is initialized and connected
-    if (mqtt_client == NULL || !mqtt_connected) {
-        ESP_LOGW(TAG, "MQTT client is not initialized or not connected.");
-        if (mqtt_connection_mode > (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
-            ESP_LOGI(TAG, "Restoring connection to MQTT...");
-            if (mqtt_init() != ESP_OK) {
-                ESP_LOGE(TAG, "MQTT client re-init failed. Will not publish any data to MQTT.");
-                return ESP_FAIL;
-            }
-        } else {
-            ESP_LOGW(TAG, "Re-connect disabled by MQTT mode setting. Visit device WEB interface to adjust it.");
-            return ESP_FAIL;
-        }
+    ESP_LOGI(TAG, "%s: Waiting for MQTT connection to become ready...", __func__);
+
+    // Wait up to 10 seconds total
+    EventBits_t bits = xEventGroupWaitBits(
+        g_sys_events,             // event group handle
+        BIT_MQTT_CONNECTED | BIT_MQTT_READY,       // bit(s) to wait for
+        pdFALSE,                  // don't clear the bit on exit
+        pdTRUE,                   // wait for all bits (only one here)
+        pdMS_TO_TICKS(10000)      // timeout 10 seconds
+    );
+
+    if ((bits & BIT_MQTT_CONNECTED) && (bits & BIT_MQTT_READY)) {
+        ESP_LOGI(TAG, "%s: MQTT connection is ready!", __func__);
+        // Continue normal operation
+    } else {
+        ESP_LOGE(TAG, "%s: MQTT never became ready after 10 seconds", __func__);
+        return ESP_FAIL;
     }
 
     /* Declare NULL pointer for string variables */
@@ -253,12 +262,12 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
     // Create MQTT topics based on mqtt_prefix and device_id
     char topic_voltage[256], topic_voltage_raw[256], topic_voltage_offset[256], topic_pressure[256], topic_multiplier[256], topic_state[256];
-    snprintf(topic_voltage, sizeof(topic_voltage), "%s/%s/sensor/voltage", mqtt_prefix, device_id);
-    snprintf(topic_voltage_raw, sizeof(topic_voltage_raw), "%s/%s/sensor/voltage_raw", mqtt_prefix, device_id);
-    snprintf(topic_voltage_offset, sizeof(topic_voltage_offset), "%s/%s/sensor/voltage_offset", mqtt_prefix, device_id);
-    snprintf(topic_pressure, sizeof(topic_pressure), "%s/%s/sensor/pressure", mqtt_prefix, device_id);
-    snprintf(topic_multiplier, sizeof(topic_multiplier), "%s/%s/sensor/multiplier", mqtt_prefix, device_id);
-    snprintf(topic_state, sizeof(topic_state), "%s/%s/sensor", mqtt_prefix, device_id);
+    snprintf(topic_voltage, sizeof(topic_voltage), "%s/%s/%s/voltage", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
+    snprintf(topic_voltage_raw, sizeof(topic_voltage_raw), "%s/%s/%s/voltage_raw", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
+    snprintf(topic_voltage_offset, sizeof(topic_voltage_offset), "%s/%s/%s/voltage_offset", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
+    snprintf(topic_pressure, sizeof(topic_pressure), "%s/%s/%s/pressure", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
+    snprintf(topic_multiplier, sizeof(topic_multiplier), "%s/%s/%s/multiplier", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
+    snprintf(topic_state, sizeof(topic_state), "%s/%s/%s", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
 
     // Publish each sensor data field separately
     int msg_id;
@@ -344,24 +353,30 @@ void cleanup_mqtt() {
     }
 }
 
-void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_prefix, const char *homeassistant_prefix) {
-    
+esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_prefix, const char *homeassistant_prefix) {
+
+    // Wait up to 10 seconds total
+    EventBits_t bits = xEventGroupWaitBits(
+        g_sys_events,             // event group handle
+        BIT_MQTT_CONNECTED | BIT_MQTT_READY,       // bit(s) to wait for
+        pdFALSE,                  // don't clear the bit on exit
+        pdTRUE,                   // wait for all bits (only one here)
+        pdMS_TO_TICKS(10000)      // timeout 10 seconds
+    );
+
+    if ((bits & BIT_MQTT_CONNECTED) && (bits & BIT_MQTT_READY)) {
+        ESP_LOGI(TAG, "%s: MQTT connection is ready!", __func__);
+        // Continue normal operation
+    } else {
+        ESP_LOGE(TAG, "%s: MQTT never became ready after 10 seconds", __func__);
+        return ESP_FAIL;
+    }
+
     uint16_t mqtt_connection_mode;
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
     if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
-        ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped.");
-        return;
-    }
-
-    // wait for MQTT to connect
-    int i = 0, c_limit = 10;
-    while(!mqtt_connected) {
-        ESP_LOGI(TAG, "Waiting for MQTT connection to become ready...");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        if (++i > c_limit) {
-            ESP_LOGE(TAG, "MQTT never became ready after %i seconds", c_limit);
-            return;
-        }
+        ESP_LOGW(TAG, "%s: MQTT disabled in device settings. Publishing skipped.", __func__);
+        return ESP_FAIL;
     }
     
     char topic[512];
@@ -383,11 +398,14 @@ void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_
     state_class = "measurement";
     if (ha_entity_discovery_fullfill(entity_discovery, metric, unit, device_class, state_class) != ESP_OK) {
         ESP_LOGE(TAG, "Unable to initiate entity discovery for %s", metric);
-        return;
+        return ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "%s: Entity discovery for %s initialized successfully", __func__, metric);
+        ha_entity_discovery_print(entity_discovery);  // Print the discovery struct for debugging
     }
 
     char *discovery_json = ha_entity_discovery_print_JSON(entity_discovery);
-    ESP_LOGI(TAG, "Device discovery serialized:\n%s", discovery_json);
+    ESP_LOGI(TAG, "%s: Device discovery serialized:\n%s", __func__, discovery_json);
     memset(discovery_path, 0, sizeof(discovery_path));
     sprintf(discovery_path, "%s/%s", homeassistant_prefix, HA_DEVICE_FAMILY);
     sprintf(topic, "%s/%s/%s/%s", discovery_path, device_id, metric, HA_DEVICE_CONFIG_PATH);
@@ -398,8 +416,19 @@ void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_
         is_error = true;
     }
     // tell we are online
-    msg_id = esp_mqtt_client_publish(mqtt_client, entity_discovery->availability->topic, "online", 0, 0, true);
+    // Publish availability as "online"
+    char *ha_availability_entry_json = ha_availability_entry_print_JSON("online");
+    msg_id = esp_mqtt_client_publish(
+        mqtt_client,
+        entity_discovery->availability->topic,
+        ha_availability_entry_json,
+        0, MQTT_QOS_PUBLISH, 1);
 
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "Availability topic %s not published",
+                entity_discovery->availability->topic);
+        is_error = true;
+    }
     ha_entity_discovery_free(entity_discovery);
 
     /* Voltage */
@@ -409,7 +438,7 @@ void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_
     state_class = "measurement";
     if (ha_entity_discovery_fullfill(entity_discovery, metric, unit, device_class, state_class) != ESP_OK) {
         ESP_LOGE(TAG, "Unable to initiate entity discovery for %s", metric);
-        return;
+        return ESP_FAIL;
     }
 
     discovery_json = ha_entity_discovery_print_JSON(entity_discovery);
@@ -432,7 +461,7 @@ void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_
     state_class = "measurement";
     if (ha_entity_discovery_fullfill(entity_discovery, metric, unit, device_class, state_class) != ESP_OK) {
         ESP_LOGE(TAG, "Unable to initiate entity discovery for %s", metric);
-        return;
+        return ESP_FAIL;
     }
 
     discovery_json = ha_entity_discovery_print_JSON(entity_discovery);
@@ -451,8 +480,10 @@ void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_
 
     if (is_error) {
         ESP_LOGE(TAG, "There were errors when publishing Home Assistant device configuration to MQTT.");
+        return ESP_FAIL;
     } else {
         ESP_LOGI(TAG, "Home Assistant device configuration published.");
+        return ESP_OK;
     }
 }
 

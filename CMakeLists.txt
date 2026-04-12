@@ -16,7 +16,7 @@ set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 spiffs_create_partition_image(storage spiffs FLASH_IN_PROJECT)
 
 # Define the major version
-set(MAJOR_VERSION "1.2.0")
+set(MAJOR_VERSION "1.0")
 
 # Find Python interpreter
 find_package(Python3 REQUIRED)

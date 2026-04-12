@@ -69,9 +69,9 @@ typedef struct {
     char *unit_of_measurement;
     char *value_template;
     bool optimistic;
-    bool payload_off;
-    bool payload_on;
-    char *command_topic;
+    // bool payload_off;
+    // bool payload_on;
+    // char *command_topic;
 } ha_entity_discovery_t;
 
 
@@ -93,5 +93,10 @@ cJSON *ha_entity_discovery_to_JSON(ha_entity_discovery_t *discovery);
 char* ha_entity_discovery_print_JSON(ha_entity_discovery_t *discovery);
 cJSON *ha_availability_entry_to_JSON(const char *state);
 char* ha_availability_entry_print_JSON(const char *state);
+
+esp_err_t ha_entity_discovery_print(ha_entity_discovery_t *discovery);
+esp_err_t ha_device_print(ha_device_t *device);
+esp_err_t ha_entity_origin_print(ha_entity_origin_t *origin);
+esp_err_t ha_availability_print(ha_entity_availability_t *availability);
 
 #endif

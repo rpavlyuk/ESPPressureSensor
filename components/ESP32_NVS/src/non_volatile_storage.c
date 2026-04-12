@@ -25,7 +25,7 @@ esp_err_t nvs_init(void)
     return err;
 }
 
-static esp_err_t esp32_nvs_open(const char *namespace, nvs_open_mode_t open_mode, nvs_handle_t *nvs_handle)
+esp_err_t esp32_nvs_open(const char *namespace, nvs_open_mode_t open_mode, nvs_handle_t *nvs_handle)
 {
     esp_err_t err = nvs_open(namespace, open_mode, nvs_handle); 
     if (err != ESP_OK) {
@@ -246,7 +246,7 @@ esp_err_t nvs_write_blob(const char *namespace, const char *key, const void *val
     return esp32_nvs_write(namespace, key, NVS_TYPE_BLOB, value, length);
 }
 
-static esp_err_t esp32_nvs_read(const char *namespace, const char *key, nvs_type_t type_value,
+esp_err_t esp32_nvs_read(const char *namespace, const char *key, nvs_type_t type_value,
                                 void *value, size_t length)
 {
     if (namespace == NULL) {

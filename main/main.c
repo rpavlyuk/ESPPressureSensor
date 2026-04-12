@@ -41,6 +41,16 @@ void app_main(void) {
         ESP_LOGE(TAG, "Failed to create system event group");
         return; // or handle error gracefully
     }
+
+    /* Reset system event bits */
+    reset_system_bits();
+
+    /* Logging setup */
+    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
+    esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
+    esp_log_level_set("non_volatile_storage", ESP_LOG_WARN);
+    esp_log_level_set("NVS_LARGE", ESP_LOG_VERBOSE);
     
     // Initialize NVS
     ESP_ERROR_CHECK(nvs_init());

@@ -26,6 +26,8 @@
 #define NON_VOLATILE_STORAGE_H_
 
 #include "esp_err.h"
+#include <nvs.h>
+#include <nvs_flash.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +47,33 @@ extern "C" {
  *         - Error codes from nvs_flash_secure_init_partition API (when “NVS_ENCRYPTION” is enabled).
  */
 esp_err_t nvs_init(void);
+
+
+/**
+ * @brief Open a non-volatile storage namespace
+ * 
+ * @param[in] namespace Namespace name. Maximum length is (NVS_KEY_NAME_MAX_SIZE-1) characters. Shouldn’t be empty.
+ * @param[in] open_mode Open mode. Can be NVS_READONLY, NVS_READWRITE, or NVS_READWRITE_ERASE.
+ * @param[out] nvs_handle Pointer to the storage handle.
+ * @return
+ *        - ESP_OK if storage was successfully opened.
+ *        - ESP_ERR_NVS_NOT_INITIALIZED if the storage system is not initialized.
+ *        - ESP_ERR_NVS_INVALID_NAME if namespace name doesn’t satisfy constraints.
+ *        - ESP_ERR_NVS_READ_ONLY if storage handle was opened as read only.
+ *        - ESP_ERR_NVS_NOT_FOUND if the requested namespace doesn’t exist.
+ *        - ESP_ERR_NVS_INVALID_HANDLE if handle is NULL.
+ *        - ESP_ERR_NVS_INVALID_OPERATION if the storage handle was opened with NVS_READONLY mode and an attempt to write data was made.
+ *        - ESP_ERR_NVS_NO_FREE_PAGES if there are no free pages in the storage.
+ *        - ESP_ERR_NVS_NEW_VERSION_FOUND if the storage contains data in a newer format and cannot be recognized by this version of the software.
+ *        - ESP_ERR_NVS_PARTITION_MISSING if the partition containing NVS data is missing.
+ *        - ESP_ERR_NVS_PARTITION_INVALID if the partition containing NVS data is invalid.
+ *        - ESP_ERR_NVS_FLASH_INCONSISTENT if the underlying flash storage is inconsistent.
+ *        - ESP_ERR_NVS_INVALID_LENGTH if the length of the data read from NVS is not sufficient to store the data.
+ *        - ESP_ERR_NVS_INVALID_STATE if the storage handle has been closed.
+ *        - ESP_ERR_NVS_NOT_ENOUGH_SPACE if there is not enough space in the underlying storage to save the value.
+ *        - ESP_ERR_NVS_REMOVE_FAILED if the value wasn’t updated because flash write operation has failed. The value was written however, and update will be finished after re-initialization of nvs, provided that flash operation doesn’t fail again.
+ */
+esp_err_t esp32_nvs_open(const char *namespace, nvs_open_mode_t open_mode, nvs_handle_t *nvs_handle);
 
 /**
  * @brief Write int8_t, uint8, int16... value for given key
@@ -73,6 +102,23 @@ esp_err_t nvs_write_string(const char *namespace, const char *key, const char *v
 esp_err_t nvs_write_float(const char *namespace, const char *key, float value);
 esp_err_t nvs_write_double(const char *namespace, const char *key, double value);
 esp_err_t nvs_write_blob(const char *namespace, const char *key, const void *value, size_t length);
+
+
+/**
+ * @brief Read value for given key
+ * 
+ * @param[in] namespace Namespace name. Maximum length is (NVS_KEY_NAME_MAX_SIZE-1) characters. Shouldn’t be empty.
+ * @param[in] key Key name. Maximum length is (NVS_KEY_NAME_MAX_SIZE-1) characters. Shouldn’t be empty.
+ * @param[in] type_value Type of the value to read.
+ * @param[out] value Pointer to the output value. May be NULL for nvs_get_str and nvs_get_blob, in this case required length will be returned in length argument.
+ * @param[in] length Length of the value to read. For strings, this is the size of the buffer. For blobs, this is the size of the buffer.
+ * @return
+ *        - ESP_OK if the value was retrieved successfully.
+ *       - ESP_FAIL if there is an internal error; most likely due to corrupted NVS partition (only if NVS assertion checks are disabled).
+ *      - ESP_ERR_NVS_NOT_FOUND if the requested key doesn’t exist.
+ */
+esp_err_t esp32_nvs_read(const char *namespace, const char *key, nvs_type_t type_value,
+                                void *value, size_t length);
 
 /**
  * @brief Read int8_t, uint8, int16... value for given key

@@ -41,7 +41,7 @@ esp_err_t mqtt_init(void);
 esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data);
 
 // publish device definitions to Home Assistant
-void mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_prefix, const char *homeassistant_prefix);
+esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_prefix, const char *homeassistant_prefix);
 
 // HA device update task
 void mqtt_device_config_task(void *param);

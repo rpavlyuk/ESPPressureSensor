@@ -441,6 +441,44 @@ esp_err_t ha_entity_discovery_fullfill(ha_entity_discovery_t *discovery, const c
         return ESP_ERR_INVALID_ARG;
     }
 
+    // Allocate and read MQTT prefix and device ID from NVS
+    char *mqtt_prefix = NULL;
+
+    err = nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MQTT prefix from NVS");
+        free(device_id);
+        free(device_serial);
+        return err;
+    }
+
+    size_t topic_len = strlen(mqtt_prefix) + strlen(device_id) + strlen(HA_DEVICE_STATE_PATH_SENSOR) + 3;  // for slashes and null terminator
+
+    // Allocate memory for state_topic and format it
+    discovery->state_topic = (char *)malloc(topic_len);
+    if (discovery->state_topic == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for state topic");
+        free(discovery->json_attributes_topic);
+        free(mqtt_prefix);
+        free(device_id);
+        free(device_serial);
+        return ESP_ERR_NO_MEM;
+    }
+    snprintf(discovery->state_topic, topic_len, "%s/%s/%s", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
+
+    // Allocate memory for json_attributes_topic and format it
+    size_t json_attr_topic_len = strlen(mqtt_prefix) + strlen(device_id) + strlen(HA_DEVICE_STATE_PATH_SENSOR) + 3;  // for slashes and null terminator
+    discovery->json_attributes_topic = (char *)malloc(json_attr_topic_len);
+    if (discovery->json_attributes_topic == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for json_attributes_topic");
+        free(discovery->state_topic);
+        free(mqtt_prefix);
+        free(device_id);
+        free(device_serial);
+        return ESP_ERR_NO_MEM;
+    }
+    snprintf(discovery->json_attributes_topic, json_attr_topic_len, "%s/%s/%s", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
+
     // Allocate memory for unique_id and format it
     discovery->unique_id = (char *)malloc(strlen(device_id) + strlen(device_serial) + strlen(metric) + 3);  // +3 for two '_' and null terminator
     if (discovery->unique_id == NULL) {
@@ -451,6 +489,18 @@ esp_err_t ha_entity_discovery_fullfill(ha_entity_discovery_t *discovery, const c
         return ESP_ERR_NO_MEM;
     }
     sprintf(discovery->unique_id, "%s_%s_%s", device_id, device_serial, metric);
+
+    // Allocate memory for name and format it
+    discovery->name = (char *)malloc(strlen(metric) + 1);  // +1 for null terminator
+    if (discovery->name == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for name");
+        free(device_id);
+        free(device_serial);
+        free(discovery->object_id);
+        free(discovery->unique_id);
+        return ESP_ERR_NO_MEM;
+    }
+    sprintf(discovery->name, "%s", metric);
 
     // Set unit of measurement, device & state class
     discovery->unit_of_measurement = unit;
@@ -500,13 +550,99 @@ esp_err_t ha_entity_discovery_free(ha_entity_discovery_t *discovery) {
         free(discovery->unique_id);
         free(discovery->value_template);
 
+        /* Uncomment if command topic and payloads are used in the future
         if (discovery->command_topic != NULL) {
             free(discovery->command_topic);
         }
+        */
 
         free(discovery->name);
 
         // free(discovery);  // Finally, free the discovery struct itself
+    }
+
+    return ESP_OK;
+}
+
+
+esp_err_t ha_entity_origin_print(ha_entity_origin_t *origin) {
+    if (origin == NULL) {
+        ESP_LOGE(TAG, "Got NULL as ENTITY ORIGIN. Please, init it first!");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // print the origin entity as a string for debugging, line by line
+    ESP_LOGI(TAG, "ENTITY ORIGIN:");
+    ESP_LOGI(TAG, "- name: %s", origin->name);
+    ESP_LOGI(TAG, "- url: %s", origin->url);
+    ESP_LOGI(TAG, "- sw: %s", origin->sw);
+
+    return ESP_OK;
+}
+
+esp_err_t ha_availability_print(ha_entity_availability_t *availability) {
+    if (availability == NULL) {
+        ESP_LOGE(TAG, "Got NULL as ENTITY AVAILABILITY. Please, init it first!");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // print the availability entity as a string for debugging, line by line
+    ESP_LOGI(TAG, "ENTITY AVAILABILITY:");
+    ESP_LOGI(TAG, "- topic: %s", availability->topic);
+    ESP_LOGI(TAG, "- value_template: %s", availability->value_template);
+
+    return ESP_OK;
+}
+
+esp_err_t ha_device_print(ha_device_t *device) {
+    if (device == NULL) {
+        ESP_LOGE(TAG, "Got NULL as DEVICE. Please, init it first!");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // print the device entity as a string for debugging, line by line
+    ESP_LOGI(TAG, "DEVICE:");
+    ESP_LOGI(TAG, "- manufacturer: %s", device->manufacturer);
+    ESP_LOGI(TAG, "- model: %s", device->model);
+    ESP_LOGI(TAG, "- name: %s", device->name);
+    ESP_LOGI(TAG, "- sw_version: %s", device->sw_version);
+    ESP_LOGI(TAG, "- configuration_url: %s", device->configuration_url);
+    ESP_LOGI(TAG, "- via_device: %s", device->via_device);
+    ESP_LOGI(TAG, "- identifiers[0]: %s", device->identifiers[0]);
+
+    return ESP_OK;
+}
+
+esp_err_t ha_entity_discovery_print(ha_entity_discovery_t *discovery) {
+    if (discovery == NULL) {
+        ESP_LOGE(TAG, "Got NULL as ENTITY DISCOVERY. Please, init it first!");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // print the discovery entity as a string for debugging, line by line
+    ESP_LOGI(TAG, "ENTITY DISCOVERY:");
+    ESP_LOGI(TAG, "- name: %s", discovery->name);
+    ESP_LOGI(TAG, "- device_class: %s", discovery->device_class);
+    ESP_LOGI(TAG, "- enabled_by_default: %s", discovery->enabled_by_default ? "true" : "false");
+    ESP_LOGI(TAG, "- json_attributes_topic: %s", discovery->json_attributes_topic);
+    ESP_LOGI(TAG, "- object_id: %s", discovery->object_id);
+    ESP_LOGI(TAG, "- state_topic: %s", discovery->state_topic);
+    ESP_LOGI(TAG, "- unique_id: %s", discovery->unique_id);
+    ESP_LOGI(TAG, "- value_template: %s", discovery->value_template);
+
+    // print availability
+    if (discovery->availability != NULL) {
+        ha_availability_print(&discovery->availability[0]);
+    }
+
+    // print device
+    if (discovery->device != NULL) {
+        ha_device_print(discovery->device);
+    }
+
+    // print origin
+    if (discovery->origin != NULL) {
+        ha_entity_origin_print(discovery->origin);
     }
 
     return ESP_OK;
@@ -533,11 +669,13 @@ cJSON *ha_entity_discovery_to_JSON(ha_entity_discovery_t *discovery) {
     cJSON_AddStringToObject(root, "unique_id", discovery->unique_id);
     cJSON_AddStringToObject(root, "value_template", discovery->value_template);
 
+    /* Uncomment if command topic and payloads are used in the future
     if (discovery->command_topic != NULL) {
         cJSON_AddStringToObject(root, "command_topic", discovery->command_topic);
     }
     cJSON_AddBoolToObject(root, "payload_on", discovery->payload_on);
     cJSON_AddBoolToObject(root, "payload_off", discovery->payload_off);
+    */
     cJSON_AddBoolToObject(root, "optimistic", discovery->optimistic);
     cJSON_AddStringToObject(root, "name", discovery->name);
 

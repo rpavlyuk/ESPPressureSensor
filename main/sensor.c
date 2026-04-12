@@ -266,29 +266,47 @@ float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_uni
  */
 cJSON *sensor_state_to_JSON(sensor_data_t *s_data) {
 
-   cJSON *root = cJSON_CreateObject();
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        return NULL;
+    }
 
-    cJSON *j_pressure = cJSON_CreateNumber(s_data->pressure);
+    // pressure: 2 decimal places
+    cJSON *j_pressure = cJSON_CreateNumber(
+        roundf(s_data->pressure * 100.0f) / 100.0f
+    );
     if (j_pressure != NULL) {
         cJSON_AddItemToObject(root, "pressure", j_pressure);
     }
 
-    cJSON *j_voltage = cJSON_CreateNumber(s_data->voltage);
+    // voltage: 4 decimal places
+    cJSON *j_voltage = cJSON_CreateNumber(
+        roundf(s_data->voltage * 10000.0f) / 10000.0f
+    );
     if (j_voltage != NULL) {
         cJSON_AddItemToObject(root, "voltage", j_voltage);
     }
 
-    cJSON *j_voltage_offset = cJSON_CreateNumber(s_data->voltage_offset);
+    // voltage_offset: 3 decimal places
+    cJSON *j_voltage_offset = cJSON_CreateNumber(
+        roundf(s_data->voltage_offset * 1000.0f) / 1000.0f
+    );
     if (j_voltage_offset != NULL) {
         cJSON_AddItemToObject(root, "voltage_offset", j_voltage_offset);
     }
 
-    cJSON *j_sensor_linear_multiplier = cJSON_CreateNumber(s_data->sensor_linear_multiplier);
+    // sensor_linear_multiplier: raw
+    cJSON *j_sensor_linear_multiplier = cJSON_CreateNumber(
+        s_data->sensor_linear_multiplier
+    );
     if (j_sensor_linear_multiplier != NULL) {
         cJSON_AddItemToObject(root, "sensor_linear_multiplier", j_sensor_linear_multiplier);
     }
 
-    cJSON *j_voltage_raw = cJSON_CreateNumber(s_data->voltage_raw);
+    // voltage_raw: raw
+    cJSON *j_voltage_raw = cJSON_CreateNumber(
+        s_data->voltage_raw
+    );
     if (j_voltage_raw != NULL) {
         cJSON_AddItemToObject(root, "voltage_raw", j_voltage_raw);
     }
