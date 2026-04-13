@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 
 #include "freertos/event_groups.h"
+#include "main.h"
 
 extern EventGroupHandle_t g_sys_events;
 

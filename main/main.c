@@ -138,11 +138,12 @@ void app_main(void) {
             return;
         }
 
-        // start web
-        if (_DEVICE_ENABLE_WEB) {
-            ESP_LOGI(TAG, "WEB ENABLED!");
-            start_webserver();
-        }
+#if _DEVICE_ENABLE_WEB || _DEVICE_ENABLE_HTTP_API
+        // start web server
+        ESP_LOGI(TAG, "WEB and/or HTTP API ENABLED!");
+
+        xTaskCreate(run_http_server, "run_http_server", 16384, NULL, 5, NULL);
+#endif
 
         uint16_t mqtt_connection_mode;
         ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));

@@ -83,7 +83,7 @@
 
     function updateSensorData() {
         $.ajax({
-            url: '/status-data',
+            url: '/api/status',
             type: 'GET',
             dataType: 'json',
             success: function(response) {

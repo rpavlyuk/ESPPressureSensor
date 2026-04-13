@@ -13,6 +13,8 @@
 #define ADC_WIDTH               ADC_WIDTH_BIT_12        // 12-bit ADC width for higher resolution
 #define ADC_ATTEN               ADC_ATTEN_DB_2_5        // Set attenuation
 
+#define REBOOT_ON_SENSOR_FAILURE true
+
 /**
  * Sensor readings information
  */

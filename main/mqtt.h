@@ -49,4 +49,10 @@ void mqtt_device_config_task(void *param);
 // Call this function when you are shutting down the application or no longer need the MQTT client
 void cleanup_mqtt();
 
+// Call this function to stop the MQTT client (e.g., before rebooting)
+esp_err_t mqtt_stop(void);
+
+// Validate MQTT connection mode value
+bool mqtt_conn_mode_is_valid(int v);
+
 #endif // MQTT_H

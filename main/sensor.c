@@ -11,6 +11,7 @@
 #include <math.h>
 
 #include "common.h"
+#include "flags.h"
 #include "sensor.h"
 #include "settings.h"
 #include "mqtt.h"
@@ -103,18 +104,29 @@ void sensor_adc_calibration_deinit(adc_cali_handle_t handle)
 void sensor_run(void *pvParameters) {
 
     // wait for the device to become ready
-    ESP_LOGI(TAG, "Waiting for device to become ready");
-    int attempt = 0;
-    int max_attempts = 255;
-    while(device_ready < 1)
-    {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        ESP_LOGD(TAG, "Attempt #%i", attempt++);
-        if (attempt > max_attempts)
-        {
-            ESP_LOGI(TAG, "Max attempts to make device ready reached. Trying to continue and hoping for the best...");
-            break;
-        }      
+        // Wait up to 30 seconds total
+    int wait_time_ms = 30000;
+    EventBits_t bits = xEventGroupWaitBits(
+        g_sys_events,             // event group handle
+        BIT_DEVICE_READY,       // bit(s) to wait for
+        pdFALSE,                  // don't clear the bit on exit
+        pdTRUE,                   // wait for all bits (only one here)
+        pdMS_TO_TICKS(wait_time_ms)      // timeout 30 seconds
+    );
+
+    if ((bits & BIT_DEVICE_READY)) {
+        ESP_LOGI(TAG, "%s: Device is ready!", __func__);
+        // Continue normal operation
+    } else {
+        ESP_LOGE(TAG, "%s: Device never became ready after %d seconds", __func__, wait_time_ms/1000);
+#if REBOOT_ON_SENSOR_FAILURE
+        ESP_LOGE(TAG, "%s: Rebooting device due to sensor initialization failure", __func__);
+        esp_restart();
+#else
+        ESP_LOGE(TAG, "%s: Sensor initialization failed. Halting sensor task.", __func__);
+        vTaskDelete(NULL); // Delete the current task to halt execution of the sensor task
+        return;
+#endif
     }
     
 

@@ -11,6 +11,7 @@
 
 #include "common.h"
 #include "settings.h"
+#include "flags.h"
 #include "sensor.h"
 #include "zigbee.h"
 #include "web.h"
@@ -18,46 +19,60 @@
 #include "hass.h"
 #include "mqtt.h"
 
-void init_filesystem() {
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path = "/spiffs",
-        .partition_label = NULL,
-        .max_files = 5,
-        .format_if_mount_failed = true
-    };
+static httpd_handle_t server = NULL;
 
-    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+/**
+ * @brief: Run the HTTP server
+ * 
+ * This function creates an HTTP server and registers the necessary URI handlers.
+ * It waits for the Wi-Fi to connect before starting the server.
+ * 
+ * @param[in] param: Task parameters (unused)
+ * 
+ * @return void No return value
+ */
+void run_http_server(void *param) {
 
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount or format filesystem");
-        return;
-    }
+    // wait for Wi-Fi to connect
+    ESP_LOGI(TAG, "HTTPD Server: Waiting for Wi-Fi/network to become ready...");
 
-    size_t total = 0, used = 0;
-    ret = esp_spiffs_info(NULL, &total, &used);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get SPIFFS partition information");
-    } else {
-        ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
-    }
-}
+    xEventGroupWaitBits(
+        g_sys_events,            // event group handle
+        BIT_WIFI_CONNECTED,      // bit(s) to wait for
+        pdFALSE,                 // don’t clear the bit when unblocked
+        pdTRUE,                  // wait until *all* bits are set (only one here)
+        portMAX_DELAY            // wait forever
+    );
 
+    ESP_LOGI(TAG, "HTTPD Server: Wi-Fi/network is ready!");
 
-void start_webserver(void) {
-    httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+#if _DEVICE_ENABLE_WEB
+    config.max_uri_handlers = 24;
+#else
+    config.max_uri_handlers = 16;
+#endif
+    config.stack_size = 16384;
+    config.recv_wait_timeout = 20;
+    config.uri_match_fn = httpd_uri_match_wildcard;
 
     // Start the httpd server
     ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
-        // Set URI handlers
+        ESP_LOGI(TAG, "HTTP server started. Registering handlers...");
+        esp_err_t err;
+        int h_count = 0; // handler count
+#if _DEVICE_ENABLE_WEB
+        // Set WEB URI handlers
         httpd_uri_t config_uri = {
             .uri       = "/",
             .method    = HTTP_GET,
             .handler   = config_get_handler,
             .user_ctx  = NULL
         };
-        httpd_register_uri_handler(server, &config_uri);
+        err = httpd_register_uri_handler(server, &config_uri);
+        ESP_LOGI(TAG, "Register %s => %s", config_uri.uri, esp_err_to_name(err));
+        h_count++;
 
         httpd_uri_t status_uri = {
             .uri       = "/status",
@@ -65,7 +80,9 @@ void start_webserver(void) {
             .handler   = status_get_handler,
             .user_ctx  = NULL
         };
-        httpd_register_uri_handler(server, &status_uri);
+        err = httpd_register_uri_handler(server, &status_uri);
+        ESP_LOGI(TAG, "Register %s => %s", status_uri.uri, esp_err_to_name(err));
+        h_count++;
 
         httpd_uri_t submit_uri = {
             .uri       = "/submit",
@@ -73,7 +90,10 @@ void start_webserver(void) {
             .handler   = submit_post_handler,
             .user_ctx  = NULL
         };
-        httpd_register_uri_handler(server, &submit_uri);
+        err = httpd_register_uri_handler(server, &submit_uri);
+        ESP_LOGI(TAG, "Register %s => %s", submit_uri.uri, esp_err_to_name(err));
+        h_count++;
+
 
         // URI handler for reboot action
         httpd_uri_t reboot_uri = {
@@ -82,8 +102,11 @@ void start_webserver(void) {
             .handler = reboot_handler,
             .user_ctx = NULL
         };
-        httpd_register_uri_handler(server, &reboot_uri);
+        err = httpd_register_uri_handler(server, &reboot_uri);
+        ESP_LOGI(TAG, "Register %s => %s", reboot_uri.uri, esp_err_to_name(err));
+        h_count++;
 
+#if _DEVICE_ENABLE_ZIGBEE
         // Register the Zigbee connect handler
         httpd_uri_t connect_zigbee_uri = {
             .uri       = "/connect-zigbee",
@@ -91,16 +114,10 @@ void start_webserver(void) {
             .handler   = connect_zigbee_handler,
             .user_ctx  = NULL
         };
-        httpd_register_uri_handler(server, &connect_zigbee_uri);
-
-        // Register the status web service handler
-        httpd_uri_t status_webserver_get_uri = {
-            .uri       = "/status-data",
-            .method    = HTTP_GET,
-            .handler   = status_data_handler,
-            .user_ctx  = NULL
-        };
-        httpd_register_uri_handler(server, &status_webserver_get_uri);
+        err = httpd_register_uri_handler(server, &connect_zigbee_uri);
+        ESP_LOGI(TAG, "Register %s => %s", connect_zigbee_uri.uri, esp_err_to_name(err));
+        h_count++;
+#endif
 
         httpd_uri_t ca_cert_uri = {
             .uri       = "/ca-cert",
@@ -110,13 +127,459 @@ void start_webserver(void) {
         };
 
         // Register the handler
-        httpd_register_uri_handler(server, &ca_cert_uri);  
+        err = httpd_register_uri_handler(server, &ca_cert_uri);  
+        ESP_LOGI(TAG, "Register %s => %s", ca_cert_uri.uri, esp_err_to_name(err));
+        h_count++;
+#endif
 
+#if _DEVICE_ENABLE_HTTP_API
+        // Register the status web service handler
+        httpd_uri_t status_webserver_get_uri = {
+            .uri       = "/api/status",
+            .method    = HTTP_GET,
+            .handler   = status_data_handler,
+            .user_ctx  = NULL
+        };
+        err = httpd_register_uri_handler(server, &status_webserver_get_uri);
+        ESP_LOGI(TAG, "Register %s => %s", status_webserver_get_uri.uri, esp_err_to_name(err));
+        h_count++;
+
+                httpd_uri_t setting_update_uri = {
+            .uri      = "/api/setting/update",  // URL endpoint
+            .method   = HTTP_POST,       // HTTP method
+            .handler  = set_setting_value_post_handler, // Function to handle the request
+            .user_ctx = NULL            // User context, if needed
+        };
+
+        // Register the setting update URI handler
+        err = httpd_register_uri_handler(server, &setting_update_uri);
+        ESP_LOGI(TAG, "Register %s => %s", setting_update_uri.uri, esp_err_to_name(err));
+        h_count++;
+
+        httpd_uri_t setting_get_all_uri = {
+            .uri      = "/api/setting/get/all",  // URL endpoint
+            .method   = HTTP_GET,       // HTTP method
+            .handler  = get_settings_all_handler, // Function to handle the request
+            .user_ctx = NULL            // User context, if needed
+        };
+
+        // Register the setting get all URI handler
+        err = httpd_register_uri_handler(server, &setting_get_all_uri);
+        ESP_LOGI(TAG, "Register %s => %s", setting_get_all_uri.uri, esp_err_to_name(err));
+        h_count++;
+
+        httpd_uri_t setting_get_one_uri = {
+            .uri      = "/api/setting/get",
+            .method   = HTTP_GET,
+            .handler  = get_setting_one_handler,
+            .user_ctx = NULL
+        };
+
+        err = httpd_register_uri_handler(server, &setting_get_one_uri);
+        ESP_LOGI(TAG, "Register %s => %s", setting_get_one_uri.uri, esp_err_to_name(err));
+        h_count++;
+#endif
+        ESP_LOGI(TAG, "%d HTTP handlers registered. Server ready!", h_count);
     } else {
-        ESP_LOGI(TAG, "Error starting server!");
+        ESP_LOGE(TAG, "Error starting HTTPD server!");
+        return;
+    }
+
+    while(server) {
+        vTaskDelay(5);
+    }  
+}
+
+// Helper function to fill in the static variables in the template
+void assign_static_page_variables(char *html_output) {
+
+    // replace size fields
+    char f_len[10];
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_SERVER_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_SERVER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PROTOCOL_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PROTOCOL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_USER_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_USER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PASSWORD_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PASSWORD}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MQTT_PREFIX_LENGTH);
+    replace_placeholder(html_output, "{LEN_MQTT_PREFIX}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", HA_PREFIX_LENGTH);
+    replace_placeholder(html_output, "{LEN_HA_PREFIX}", f_len);
+    
+    snprintf(f_len, sizeof(f_len), "%li", (long int) HA_UPDATE_INTERVAL_MIN);
+    replace_placeholder(html_output, "{MIN_HA_UPDATE_INTERVAL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%li", (long int) HA_UPDATE_INTERVAL_MAX);
+    replace_placeholder(html_output, "{MAX_HA_UPDATE_INTERVAL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%.3f", SENSOR_OFFSET_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_OFFSET}", f_len);
+    snprintf(f_len, sizeof(f_len), "%.3f", SENSOR_OFFSET_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_OFFSET}", f_len);
+
+    snprintf(f_len, sizeof(f_len), "%li", (long int) SENSOR_LINEAR_MULTIPLIER_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_LINEAR_MULTIPLIER}", f_len);
+    snprintf(f_len, sizeof(f_len), "%li", (long int) SENSOR_LINEAR_MULTIPLIER_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_LINEAR_MULTIPLIER}", f_len);
+
+
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_COUNT_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_COUNT}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_COUNT_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_COUNT}", f_len);
+
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_INTERVAL_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_INTERVAL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_INTERVAL_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_INTERVAL}", f_len);
+
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_MEDIAN_DEVIATION_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_MEDIAN_DEVIATION_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION}", f_len);  
+
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_READ_INTERVAL_MIN);
+    replace_placeholder(html_output, "{MIN_SENSOR_READ_INTERVAL}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", SENSOR_READ_INTERVAL_MAX);
+    replace_placeholder(html_output, "{MAX_SENSOR_READ_INTERVAL}", f_len); 
+}
+
+// Helper function to replace placeholders in the template
+void replace_placeholder(char *html_output, const char *placeholder, const char *value) {
+    char *pos;
+    while ((pos = strstr(html_output, placeholder)) != NULL) {
+        size_t len_before = pos - html_output;
+        size_t len_placeholder = strlen(placeholder);
+        size_t len_value = strlen(value);
+        size_t len_after = strlen(pos + len_placeholder);
+
+        // Shift the rest of the string to make space for the replacement value
+        memmove(pos + len_value, pos + len_placeholder, len_after + 1);
+
+        // Copy the replacement value into the position of the placeholder
+        memcpy(pos, value, len_value);
     }
 }
 
+/**
+ * @brief Extracts the value of a specified parameter from a buffer (POST request).
+ *
+ * This function searches for a parameter name within a given buffer and extracts its corresponding value.
+ * The extracted value is then stored in the provided output buffer.
+ *
+ * @param buf The buffer containing the parameters.
+ * @param param_name The name of the parameter to search for.
+ * @param output The buffer where the extracted parameter value will be stored.
+ * @param output_size The size of the output buffer.
+ * @return An integer providing the length of the extracted value, or 0 if the parameter is not found.
+ */
+int extract_param_value(const char *buf, const char *param_name, char *output, size_t output_size) {
+    char *start = strstr(buf, param_name);
+    if (start != NULL) {
+        start += strlen(param_name);  // Move to the value part
+        char *end = strchr(start, '&');  // Find the next '&'
+        if (end == NULL) {
+            end = start + strlen(start);  // If no '&' found, take till the end of the string
+        }
+        size_t len = end - start;
+        if (len >= output_size) {
+            len = output_size - 1;  // Ensure we don't overflow the output buffer
+        }
+        strncpy(output, start, len);
+        output[len] = '\0';  // Null-terminate the result
+        return len;  // Return the length of the extracted value
+    } else {
+        output[0] = '\0';  // If not found, return an empty string
+        return 0;  // Return 0 length when not found
+    }
+}
+
+/**
+ * @brief Retrieves the value of a GET query parameter from an HTTP request.
+ *
+ * This function extracts the value of a specified query parameter from the URL of an HTTP request.
+ * It allocates memory for the query string, retrieves it, and then searches for the specified parameter.
+ * The extracted value is stored in the provided output buffer.
+ *
+ * @param req Pointer to the HTTP request structure.
+ * @param name The name of the query parameter to retrieve.
+ * @param out Buffer where the extracted parameter value will be stored.
+ * @param out_sz Size of the output buffer.
+ * @return ESP_OK if the parameter is found and extracted successfully,
+ *         ESP_ERR_NOT_FOUND if the parameter is not found,
+ *         ESP_ERR_INVALID_ARG if any argument is invalid,
+ *         ESP_ERR_NO_MEM if memory allocation fails.
+ */
+static esp_err_t extract_param_value_from_get_query(httpd_req_t *req,
+                                     const char *name,
+                                     char *out,
+                                     size_t out_sz)
+{
+    if (!req || !name || !out || out_sz == 0) return ESP_ERR_INVALID_ARG;
+
+    out[0] = '\0';
+
+    size_t qlen = httpd_req_get_url_query_len(req);
+    if (qlen == 0) return ESP_ERR_NOT_FOUND;
+
+    char *q = malloc(qlen + 1);
+    if (!q) return ESP_ERR_NO_MEM;
+
+    esp_err_t err = httpd_req_get_url_query_str(req, q, qlen + 1);
+    if (err != ESP_OK) {
+        free(q);
+        return err;
+    }
+
+    err = httpd_query_key_value(q, name, out, out_sz);
+    free(q);
+
+    return err; // ESP_OK or ESP_ERR_NOT_FOUND
+}
+
+// helper function that will find the last occurrence of the given substring (lookup) in the input string (str) and truncate the string at that point
+void str_trunc_after(char *str, const char *lookup) {
+    if (str == NULL || lookup == NULL) {
+        return; // Return if either input is NULL
+    }
+
+    char *last_occurrence = NULL;
+    char *current_position = str;
+
+    // Find the last occurrence of the substring 'lookup' in 'str'
+    while ((current_position = strstr(current_position, lookup)) != NULL) {
+        last_occurrence = current_position;
+        current_position += strlen(lookup); // Move past the current match
+    }
+
+    // If the 'lookup' substring was found, truncate the string after its last occurrence
+    if (last_occurrence != NULL) {
+        last_occurrence[strlen(lookup)] = '\0'; // Null-terminate after the last occurrence
+    }
+}
+
+// Helper function to convert a hexadecimal character to its decimal value
+int hex_to_dec(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+// URL decoding function
+void url_decode(char *src) {
+    char *dst = src;
+    while (*src) {
+        if (*src == '%' && src[1] && src[2]) {
+            // Convert hex to character
+            *dst = (char)((hex_to_dec(src[1]) << 4) | hex_to_dec(src[2]));
+            src += 2;
+        } else if (*src == '+') {
+            // Replace '+' with space
+            *dst = ' ';
+        } else {
+            *dst = *src;
+        }
+        src++;
+        dst++;
+    }
+    *dst = '\0'; // Null-terminate the decoded string
+}
+
+/**
+ * @brief Determines the content type based on the file extension.
+ *
+ * This function takes a file path as input and returns the corresponding
+ * MIME content type based on the file extension. If the extension is not
+ * recognized, it defaults to "application/octet-stream".
+ *
+ * @param path The file path to analyze.
+ * @return The corresponding content type as a string.
+ */
+static const char *content_type_from_ext(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return "application/octet-stream";
+
+    if (strcasecmp(dot, ".html") == 0) return "text/html";
+    if (strcasecmp(dot, ".css")  == 0) return "text/css";
+    if (strcasecmp(dot, ".js")   == 0) return "application/javascript";
+    if (strcasecmp(dot, ".json") == 0) return "application/json";
+    if (strcasecmp(dot, ".svg")  == 0) return "image/svg+xml";
+    if (strcasecmp(dot, ".png")  == 0) return "image/png";
+    if (strcasecmp(dot, ".jpg")  == 0 || strcasecmp(dot, ".jpeg") == 0) return "image/jpeg";
+    if (strcasecmp(dot, ".ico")  == 0) return "image/x-icon";
+    if (strcasecmp(dot, ".txt")  == 0) return "text/plain";
+
+    return "application/octet-stream";
+}
+
+/**
+ * @brief Validates device identity from HTTP request query parameters.
+ *
+ * This function extracts the 'device_id' and 'device_serial' parameters from the HTTP request's query string
+ * and compares them with the values stored in NVS (Non-Volatile Storage). If the values match, the function
+ * returns ESP_OK; otherwise, it sends an appropriate HTTP error response and returns ESP_FAIL.
+ *
+ * @param req Pointer to the HTTP request structure.
+ * @return ESP_OK if the device identity is valid, ESP_FAIL otherwise.
+ */
+static esp_err_t validate_device_identity_from_get_query(httpd_req_t *req)
+{
+    char device_id_in[DEVICE_ID_LENGTH + 1];
+    char device_serial_in[DEVICE_SERIAL_LENGTH + 1];
+
+    esp_err_t err;
+
+    err = extract_param_value_from_get_query(req, "device_id", device_id_in, sizeof(device_id_in));
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing device_id");
+        return ESP_FAIL;
+    }
+
+    err = extract_param_value_from_get_query(req, "device_serial", device_serial_in, sizeof(device_serial_in));
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing device_serial");
+        return ESP_FAIL;
+    }
+
+    char *device_id_nvs = NULL;
+    char *device_serial_nvs = NULL;
+
+    err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id_nvs);
+    if (err != ESP_OK || !device_id_nvs) {
+        free(device_id_nvs);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read device_id from NVS");
+        return ESP_FAIL;
+    }
+
+    err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial_nvs);
+    if (err != ESP_OK || !device_serial_nvs) {
+        free(device_id_nvs);
+        free(device_serial_nvs);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read device_serial from NVS");
+        return ESP_FAIL;
+    }
+
+    bool ok = (strcmp(device_id_in, device_id_nvs) == 0) &&
+              (strcmp(device_serial_in, device_serial_nvs) == 0);
+
+    free(device_id_nvs);
+    free(device_serial_nvs);
+
+    if (!ok) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Device ID or serial mismatch");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+
+/**
+ * @brief Validates device identity from a cJSON object.
+ *
+ * This function extracts the 'device_id' and 'device_serial' fields from the provided cJSON object
+ * and compares them with the values stored in NVS (Non-Volatile Storage). If the values match, the function
+ * returns ESP_OK; otherwise, it returns ESP_FAIL.
+ *
+ * @param json Pointer to the cJSON object containing device identity fields.
+ * @return ESP_OK if the device identity is valid, ESP_FAIL otherwise.
+ */
+static esp_err_t validate_device_identity_from_json(const cJSON *json) {
+    if (!json) return ESP_FAIL;
+
+    const cJSON *device_id_in = cJSON_GetObjectItemCaseSensitive(json, "device_id");
+    const cJSON *device_serial_in = cJSON_GetObjectItemCaseSensitive(json, "device_serial");
+
+    if (!cJSON_IsString(device_id_in) || (device_id_in->valuestring == NULL)) {
+        return ESP_FAIL;
+    }
+
+    if (!cJSON_IsString(device_serial_in) || (device_serial_in->valuestring == NULL)) {
+        return ESP_FAIL;
+    }
+
+    char *device_id_nvs = NULL;
+    char *device_serial_nvs = NULL;
+
+    esp_err_t err;
+
+    err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id_nvs);
+    if (err != ESP_OK || !device_id_nvs) {
+        free(device_id_nvs);
+        return ESP_FAIL;
+    }
+
+    err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial_nvs);
+    if (err != ESP_OK || !device_serial_nvs) {
+        free(device_id_nvs);
+        free(device_serial_nvs);
+        return ESP_FAIL;
+    }
+
+    bool ok = (strcmp(device_id_in->valuestring, device_id_nvs) == 0) &&
+              (strcmp(device_serial_in->valuestring, device_serial_nvs) == 0);
+
+    free(device_id_nvs);
+    free(device_serial_nvs);
+
+    if (!ok) {
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+/**
+ * @brief Converts a cJSON value to its string representation.
+ *
+ * This function takes a cJSON value and converts it to a string representation.
+ * The resulting string is stored in the provided output buffer.
+ *
+ * @param v Pointer to the cJSON value to convert.
+ * @param out Output buffer where the string representation will be stored.
+ * @param out_sz Size of the output buffer.
+ */
+static void json_value_to_string(const cJSON *v, char *out, size_t out_sz)
+{
+    if (!out || out_sz == 0) return;
+    out[0] = '\0';
+
+    if (!v) {
+        strlcpy(out, "<null>", out_sz);
+        return;
+    }
+
+    if (cJSON_IsString(v)) {
+        strlcpy(out, v->valuestring ? v->valuestring : "", out_sz);
+    } else if (cJSON_IsNumber(v)) {
+        // cJSON numbers are double internally; valueint is OK for ints
+        // Use integer formatting if it looks integer-ish
+        double d = v->valuedouble;
+        if ((double)((int64_t)d) == d) {
+            snprintf(out, out_sz, "%lld", (long long)((int64_t)d));
+        } else {
+            snprintf(out, out_sz, "%.6f", d);
+        }
+    } else if (cJSON_IsBool(v)) {
+        strlcpy(out, cJSON_IsTrue(v) ? "true" : "false", out_sz);
+    } else if (cJSON_IsNull(v)) {
+        strlcpy(out, "null", out_sz);
+    } else {
+        // object/array/blob-ish: store compact JSON
+        char *tmp = cJSON_PrintUnformatted((cJSON *)v);
+        if (tmp) {
+            strlcpy(out, tmp, out_sz);
+            free(tmp);
+        } else {
+            strlcpy(out, "<unprintable>", out_sz);
+        }
+    }
+}
+
+
+
+/* WEB Handlers */
 
 static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Processing config web request");
@@ -517,148 +980,6 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// Helper function to fill in the static variables in the template
-void assign_static_page_variables(char *html_output) {
-
-    // replace size fields
-    char f_len[10];
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_SERVER_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_SERVER}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PROTOCOL_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PROTOCOL}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_USER_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_USER}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PASSWORD_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PASSWORD}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", MQTT_PREFIX_LENGTH);
-    replace_placeholder(html_output, "{LEN_MQTT_PREFIX}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", HA_PREFIX_LENGTH);
-    replace_placeholder(html_output, "{LEN_HA_PREFIX}", f_len);
-    
-    snprintf(f_len, sizeof(f_len), "%li", (long int) HA_UPDATE_INTERVAL_MIN);
-    replace_placeholder(html_output, "{MIN_HA_UPDATE_INTERVAL}", f_len);
-    snprintf(f_len, sizeof(f_len), "%li", (long int) HA_UPDATE_INTERVAL_MAX);
-    replace_placeholder(html_output, "{MAX_HA_UPDATE_INTERVAL}", f_len);
-    snprintf(f_len, sizeof(f_len), "%.3f", SENSOR_OFFSET_MIN);
-    replace_placeholder(html_output, "{MIN_SENSOR_OFFSET}", f_len);
-    snprintf(f_len, sizeof(f_len), "%.3f", SENSOR_OFFSET_MAX);
-    replace_placeholder(html_output, "{MAX_SENSOR_OFFSET}", f_len);
-
-    snprintf(f_len, sizeof(f_len), "%li", (long int) SENSOR_LINEAR_MULTIPLIER_MIN);
-    replace_placeholder(html_output, "{MIN_SENSOR_LINEAR_MULTIPLIER}", f_len);
-    snprintf(f_len, sizeof(f_len), "%li", (long int) SENSOR_LINEAR_MULTIPLIER_MAX);
-    replace_placeholder(html_output, "{MAX_SENSOR_LINEAR_MULTIPLIER}", f_len);
-
-
-    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_COUNT_MIN);
-    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_COUNT}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_COUNT_MAX);
-    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_COUNT}", f_len);
-
-    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_INTERVAL_MIN);
-    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_INTERVAL}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_INTERVAL_MAX);
-    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_INTERVAL}", f_len);
-
-    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_MEDIAN_DEVIATION_MIN);
-    replace_placeholder(html_output, "{MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", SENSOR_SAMPLING_MEDIAN_DEVIATION_MAX);
-    replace_placeholder(html_output, "{MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION}", f_len);  
-
-    snprintf(f_len, sizeof(f_len), "%i", SENSOR_READ_INTERVAL_MIN);
-    replace_placeholder(html_output, "{MIN_SENSOR_READ_INTERVAL}", f_len);
-    snprintf(f_len, sizeof(f_len), "%i", SENSOR_READ_INTERVAL_MAX);
-    replace_placeholder(html_output, "{MAX_SENSOR_READ_INTERVAL}", f_len); 
-}
-
-// Helper function to replace placeholders in the template
-void replace_placeholder(char *html_output, const char *placeholder, const char *value) {
-    char *pos;
-    while ((pos = strstr(html_output, placeholder)) != NULL) {
-        size_t len_before = pos - html_output;
-        size_t len_placeholder = strlen(placeholder);
-        size_t len_value = strlen(value);
-        size_t len_after = strlen(pos + len_placeholder);
-
-        // Shift the rest of the string to make space for the replacement value
-        memmove(pos + len_value, pos + len_placeholder, len_after + 1);
-
-        // Copy the replacement value into the position of the placeholder
-        memcpy(pos, value, len_value);
-    }
-}
-
-// Function to safely extract a single parameter value from the POST buffer
-int extract_param_value(const char *buf, const char *param_name, char *output, size_t output_size) {
-    char *start = strstr(buf, param_name);
-    if (start != NULL) {
-        start += strlen(param_name);  // Move to the value part
-        char *end = strchr(start, '&');  // Find the next '&'
-        if (end == NULL) {
-            end = start + strlen(start);  // If no '&' found, take till the end of the string
-        }
-        size_t len = end - start;
-        if (len >= output_size) {
-            len = output_size - 1;  // Ensure we don't overflow the output buffer
-        }
-        strncpy(output, start, len);
-        output[len] = '\0';  // Null-terminate the result
-        return len;  // Return the length of the extracted value
-    } else {
-        output[0] = '\0';  // If not found, return an empty string
-        return 0;  // Return 0 length when not found
-    }
-}
-
-// helper function that will find the last occurrence of the given substring (lookup) in the input string (str) and truncate the string at that point
-void str_trunc_after(char *str, const char *lookup) {
-    if (str == NULL || lookup == NULL) {
-        return; // Return if either input is NULL
-    }
-
-    char *last_occurrence = NULL;
-    char *current_position = str;
-
-    // Find the last occurrence of the substring 'lookup' in 'str'
-    while ((current_position = strstr(current_position, lookup)) != NULL) {
-        last_occurrence = current_position;
-        current_position += strlen(lookup); // Move past the current match
-    }
-
-    // If the 'lookup' substring was found, truncate the string after its last occurrence
-    if (last_occurrence != NULL) {
-        last_occurrence[strlen(lookup)] = '\0'; // Null-terminate after the last occurrence
-    }
-}
-
-// Helper function to convert a hexadecimal character to its decimal value
-int hex_to_dec(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-// URL decoding function
-void url_decode(char *src) {
-    char *dst = src;
-    while (*src) {
-        if (*src == '%' && src[1] && src[2]) {
-            // Convert hex to character
-            *dst = (char)((hex_to_dec(src[1]) << 4) | hex_to_dec(src[2]));
-            src += 2;
-        } else if (*src == '+') {
-            // Replace '+' with space
-            *dst = ' ';
-        } else {
-            *dst = *src;
-        }
-        src++;
-        dst++;
-    }
-    *dst = '\0'; // Null-terminate the decoded string
-}
-
 static esp_err_t reboot_handler(httpd_req_t *req) {
     ESP_LOGI("Reboot", "Rebooting the device...");
 
@@ -894,4 +1215,381 @@ static esp_err_t ca_cert_post_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "CA certificate saved successfully");
 
     return ESP_OK;
+}
+
+
+/**
+ * @brief Handler for /api/setting/update endpoint
+ *
+ * @param req HTTP request
+ * @return ESP_OK or ESP_FAIL
+ */
+static esp_err_t set_setting_value_post_handler(httpd_req_t *req) {
+    /**
+     * Request JSON format:
+     * {
+            "device_id": "<DEVICE_ID>",
+            "device_serial": "<DEVICE_SERIAL>"
+            "data": {
+                <"setting_key":   "setting_value",>
+            },
+            "action": <code> // 0 - no action, 1 - reboot if no errors, 2 - force reboot
+        }
+     * 
+     * Request JSON example:
+      {
+            "device_id": "9C9E6E0D8C5C",
+            "device_serial": "VU7303USWVEP6ENQ3POTTFHVV7JH97QX"
+            data: {
+                "ota_update_url":   "http://localhost:8080/ota/relayboard.bin",
+                "ha_upd_intervl":   60000
+            },
+            "action": 1
+        }
+     */
+    esp_err_t err;
+
+    char content[MAX_JSON_BUFFER_SIZE];
+    // Get the POST data
+    int total_len = req->content_len;
+    int received = 0;
+    if (total_len >= sizeof(content)) {
+        ESP_LOGE(TAG, "Content size overflowing the buffer!");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    while (received < total_len) {
+        int ret = httpd_req_recv(req, content + received, total_len - received);
+        if (ret <= 0) {
+            ESP_LOGE(TAG, "Unexpected error while reading from request: %i", ret);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    content[received] = '\0';
+
+    // Log request content
+    ESP_LOGI(TAG, "Received settings update request: %s", content);
+
+    // Parse the incoming JSON data
+    cJSON *json_request = cJSON_Parse(content);
+    if (json_request == NULL) {
+        ESP_LOGE(TAG, "Settings update: Failed to parse JSON request");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON format");
+        return ESP_FAIL;
+    }
+
+    // Validate of device_id and device_serial match the stored values
+    // 1 - get device_id and device_serial from JSON
+    cJSON *device_id_item = cJSON_GetObjectItem(json_request, "device_id");
+    cJSON *device_serial_item = cJSON_GetObjectItem(json_request, "device_serial");
+    if (device_id_item == NULL || !cJSON_IsString(device_id_item) ||
+        device_serial_item == NULL || !cJSON_IsString(device_serial_item)) {
+        ESP_LOGE(TAG, "Settings update: Missing or invalid 'device_id' or 'device_serial' in JSON request");
+        cJSON_Delete(json_request);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid 'device_id' or 'device_serial'");
+        return ESP_FAIL;
+    }
+    // 2 - read actual values from NVS
+    char *device_id_nvs = NULL;
+    char *device_serial_nvs = NULL;
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id_nvs));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial_nvs));
+    // 3 - compare
+    if (strcmp(device_id_item->valuestring, device_id_nvs) != 0 ||
+        strcmp(device_serial_item->valuestring, device_serial_nvs) != 0) {
+        ESP_LOGE(TAG, "Settings update: Device ID or serial mismatch");
+        free(device_id_nvs);
+        free(device_serial_nvs);
+        cJSON_Delete(json_request);
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Device ID or serial mismatch");
+        return ESP_FAIL;
+    }
+    free(device_id_nvs);
+    free(device_serial_nvs);
+
+    // Get the 'data' array from JSON
+    cJSON *data = cJSON_GetObjectItem(json_request, "data");
+    if (data == NULL) {
+        ESP_LOGE(TAG, "Settings update: No 'data' object in JSON request");
+        cJSON_Delete(json_request);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON format: missing 'data' object");
+        return ESP_FAIL;
+    }
+
+    // Iterate over each setting in the 'data' object
+    cJSON *setting = NULL;
+    int success_count = 0;
+    int failure_count = 0;
+    int total_count = 0;
+
+    // Response root
+    cJSON *resp_root = cJSON_CreateObject();
+    cJSON *resp_status = cJSON_CreateObject();
+    cJSON *resp_details = cJSON_CreateObject();
+
+    cJSON_AddItemToObject(resp_root, "status", resp_status);
+    cJSON_AddItemToObject(resp_root, "details", resp_details);
+
+    cJSON_ArrayForEach(setting, data) {
+        setting_update_msg_t update_msg = {0};
+
+        const char *setting_key = setting->string;
+        if (setting_key == NULL) {
+            ESP_LOGW(TAG, "Settings update: Encountered setting with NULL key, skipping");
+            continue;
+        }
+
+        // log the setting being processed
+        ESP_LOGI(TAG, "Settings update: Processing setting '%s'", setting_key);
+
+        total_count++;
+
+        // Apply the setting
+        esp_err_t err = apply_setting(setting_key, setting, &update_msg);
+
+        // Prepare per-key details object
+        cJSON *one = cJSON_CreateObject();
+
+        // old_value
+        if (update_msg.has_old) {
+            cJSON_AddStringToObject(one, "old_value", update_msg.old_value_str);
+        } else {
+            cJSON_AddNullToObject(one, "old_value");
+        }
+
+        // new_value (stringified)
+        char new_value_str[128];
+        json_value_to_string(setting, new_value_str, sizeof(new_value_str));
+        cJSON_AddStringToObject(one, "new_value", new_value_str);
+
+        // status: 0 success, 1 failed
+        int status = (err == ESP_OK) ? 0 : 1;
+        cJSON_AddNumberToObject(one, "status", status);
+
+        // error_msg: include only on failure (or always, your call)
+        const char *msg = update_msg.msg[0] ? update_msg.msg : esp_err_to_name(err);
+        cJSON_AddStringToObject(one, "error_msg", msg);
+        if (err != ESP_OK) {
+            failure_count++;           
+        } else {
+            success_count++;
+        }
+
+        // Attach this key’s object
+        cJSON_AddItemToObject(resp_details, setting_key, one);
+    }
+
+    // Fill the status block
+    cJSON_AddNumberToObject(resp_status, "success", success_count);
+    cJSON_AddNumberToObject(resp_status, "failed",  failure_count);
+    cJSON_AddNumberToObject(resp_status, "total",   total_count);
+
+    // now, lets process the action if any
+    bool reboot_required = false;
+    cJSON *action_item = cJSON_GetObjectItem(json_request, "action");
+    if (action_item != NULL && cJSON_IsNumber(action_item)) {
+        int action_code = action_item->valueint;
+        if (action_code == 2) {
+            // force reboot
+            reboot_required = true;
+            // notify in the response
+            ESP_LOGW(TAG, "Settings update: Reboot required due to action code 2 (force reboot even on errors)");
+        } else if (action_code == 1) {
+            // reboot if no errors
+            if (failure_count == 0) {
+                reboot_required = true;
+                ESP_LOGI(TAG, "Settings update: Reboot required due to action code 1 (reboot if no errors)");
+            } else {
+                ESP_LOGW(TAG, "Settings update: Reboot requested but not possible due to action code 1 (errors detected)");
+            }
+        } else {
+            ESP_LOGI(TAG, "Settings update: No reboot action requested (action code 0)");
+        }
+    }
+
+    // Serialize and send
+    char *resp_str = cJSON_PrintUnformatted(resp_root);
+    if (!resp_str) {
+        cJSON_Delete(resp_root);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to build response JSON");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp_str, HTTPD_RESP_USE_STRLEN);
+
+    free(resp_str);
+    cJSON_Delete(resp_root);
+    cJSON_Delete(json_request);
+
+    if (reboot_required)
+    {
+        ESP_LOGW(TAG, "Settings update: Rebooting device as per request...");
+        system_reboot(); // calling safe reboot function
+    }
+
+    return ESP_OK;
+    /**
+      Response format:
+        {
+            "status": {
+                "success": <number of successfully updated settings>,
+                "failed": <number of failed settings updates>,
+                "total": <total number of settings in the request>
+            },
+            "details": {
+                    "<setting_key>": {
+                        "old_value": "<OLD_VALUE>",
+                        "new_value": "<NEW_VALUE>",
+                        "status": 0 // 0 = success, 1 = failed
+                        "error_msg": "<ERROR_MESSAGE_IF_ANY>"
+                    }
+            }
+        }   
+     */
+}   
+
+/**
+ * @brief Handler for /api/setting/get/all endpoint
+ *
+ * @param req HTTP request
+ * @return ESP_OK or ESP_FAIL
+ */
+static esp_err_t get_settings_all_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Processing get all settings web request");
+
+    // 1) validate device identity via query args
+    if (validate_device_identity_from_get_query(req) != ESP_OK) {
+        // validate_device_identity_from_get_query already sent HTTP error response
+        return ESP_FAIL;
+    }
+
+    // 2) build settings JSON
+    setting_update_msg_t msg = {0};
+    cJSON *root = get_all_settings_value_JSON(&msg);
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to build settings JSON: %s (%s)",
+                 msg.msg[0] ? msg.msg : "unknown",
+                 esp_err_to_name(msg.err_code));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to build settings JSON");
+        return ESP_FAIL;
+    }
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (!json_str) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to serialize JSON");
+        return ESP_FAIL;
+    }
+
+    // 3) send response
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+
+    free(json_str);
+    
+    return ESP_OK;
+}
+
+/**
+ * @brief Handler for /api/setting/get?key= endpoint
+ *
+ * @param req HTTP request
+ * @return ESP_OK or ESP_FAIL
+ */
+static esp_err_t get_setting_one_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Processing get single setting web request");
+
+    // 1) Validate device identity (device_id + device_serial in query string)
+    if (validate_device_identity_from_get_query(req) != ESP_OK) {
+        return ESP_FAIL; // helper already sent response
+    }
+
+    // 2) Extract 'key' parameter
+    char key[64];
+    esp_err_t err = extract_param_value_from_get_query(req, "key", key, sizeof(key));
+    if (err != ESP_OK || key[0] == '\0') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing key");
+        return ESP_FAIL;
+    }
+
+    // Optional hardening: only allow safe characters in key
+    // (prevents weird injection into logs / filenames if you ever use key elsewhere)
+    for (const char *p = key; *p; p++) {
+        const char c = *p;
+        const bool ok =
+            (c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') ||
+            (c == '_') || (c == '-');
+        if (!ok) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid key format");
+            return ESP_FAIL;
+        }
+    }
+
+    // 3) Build JSON for that setting
+    setting_update_msg_t msg = {0};
+    cJSON *root = get_setting_value_JSON(key, &msg);
+    if (!root) {
+        // As you specified: if key not found -> NULL
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND,
+                           msg.msg[0] ? msg.msg : "Setting not found");
+        return ESP_FAIL;
+    }
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (!json_str) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to serialize JSON");
+        return ESP_FAIL;
+    }
+
+    // 4) Send response
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+
+    free(json_str);
+    return ESP_OK;
+}
+
+/** Server routines */
+
+/**
+ * @brief Stop the HTTP server
+ * 
+ * This function stops the HTTP server.
+ * 
+ * @param[in] server: The HTTP server handle
+ * 
+ * @return ESP_OK on success, or an error code on failure
+ */
+esp_err_t stop_http_server(httpd_handle_t server) {
+    // Stop the HTTP server
+    if (server != NULL) {
+        ESP_ERROR_CHECK(httpd_stop(server));
+        server = NULL;
+    } else {
+        ESP_LOGW(TAG, "NULL HTTP server handle");
+        return ESP_ERR_INVALID_ARG;
+    }
+    return ESP_OK;
+}
+
+/**
+ * @brief Stop the HTTP server started in the "run_http_server" task
+ * 
+ * This function stops the HTTP server started in the "run_http_server" task.
+ * 
+ * @return ESP_OK on success, or an error code on failure
+ */
+esp_err_t http_stop(void) {
+    return stop_http_server(server);
 }

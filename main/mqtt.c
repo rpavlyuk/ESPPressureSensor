@@ -353,6 +353,15 @@ void cleanup_mqtt() {
     }
 }
 
+/**
+ * @brief Publish Home Assistant discovery configuration for the device and its sensors
+ * 
+ * This function publishes the Home Assistant discovery configuration for the device and its sensors. It waits for the MQTT connection to become ready, checks if MQTT is enabled in the device settings, and then constructs and publishes the discovery messages for each sensor metric (pressure, voltage, voltage offset) using the Home Assistant MQTT Discovery format.
+ * @param device_id The unique identifier for the device (e.g., MAC address or serial number)
+ * @param mqtt_prefix The MQTT topic prefix to use for publishing
+ * @param homeassistant_prefix The MQTT topic prefix for Home Assistant discovery (e.g., "homeassistant")
+ * @return ESP_OK on success, ESP_FAIL on failure
+ */
 esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_prefix, const char *homeassistant_prefix) {
 
     // Wait up to 10 seconds total
@@ -487,6 +496,9 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
     }
 }
 
+/**
+ * @brief Task to periodically publish Home Assistant discovery configuration for the device and its sensors
+ */
 void mqtt_device_config_task(void *param) {
     char *device_id = NULL;
     char *mqtt_prefix = NULL;
@@ -516,5 +528,34 @@ void mqtt_device_config_task(void *param) {
     free(device_id);
     free(mqtt_prefix);
     free(ha_prefix);
+}
+
+/**
+ * @brief Stop the MQTT client.
+ * 
+ * This function stops the MQTT client and frees the resources used by the client.
+ * 
+ * @return esp_err_t    ESP_OK on success, ESP_FAIL if the client cannot be stopped.
+ */
+esp_err_t mqtt_stop(void) {
+    if (mqtt_client) {
+        cleanup_mqtt();
+    }
+    return ESP_OK;
+}
+
+/**
+ * @brief: Validate MQTT connection mode value
+ * 
+ * This function validates the MQTT connection mode value. The function checks if the
+ * value is within the valid range of MQTT connection modes.
+ * 
+ * @param[in] v The MQTT connection mode value to validate.
+ * 
+ * @return bool   true if the value is valid, false otherwise.
+ */
+bool mqtt_conn_mode_is_valid(int v)
+{
+    return (v >= MQTT_CONN_MODE_DISABLE) && (v <= MQTT_CONN_MODE_AUTOCONNECT);
 }
 
