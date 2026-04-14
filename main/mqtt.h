@@ -8,6 +8,9 @@
 #define MQTT_QOS_DEFAULT    0
 #define MQTT_QOS_SUBSCRIBE  1
 #define MQTT_QOS_PUBLISH  MQTT_QOS_DEFAULT
+#define MQTT_TOPIC_SENSOR_VALUE_MAX_LEN 128
+#define MQTT_TOPIC_HA_INTEGRATION_MAX_LEN 512
+#define MQTT_PAYLOAD_HA_INTEGRATION_MAX_LEN 512
 
 /* Macro to check if MQTT is connected */
 #define IS_MQTT_CONNECTED() \
@@ -26,8 +29,18 @@ typedef enum {
     MQTT_CONN_MODE_AUTOCONNECT,       // connect initially to MQTT and reconnect when lost
 } mqtt_connection_mode_t;
 
-// Define the SPIFFS configuration
-#define CA_CERT_PATH "/spiffs/ca.crt"
+/**
+ * @brief: Event data used to communicate between MQTT publishing event queue and other tasks
+ */
+typedef struct {
+    sensor_data_t sensor_data;  // The sensor data to be published
+} sensor_event_t;
+
+#define MQTT_QUEUE_LENGTH 16  // Number of items the queue can hold
+
+esp_err_t start_mqtt_queue_task(void);
+void mqtt_event_task(void *arg);
+esp_err_t trigger_mqtt_publish(const sensor_data_t *sensor_data);
 
 static void log_error_if_nonzero(const char *message, int error_code);
 

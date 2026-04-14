@@ -14,10 +14,113 @@
 #include "sensor.h"  // To access the sensor_data
 #include "hass.h"
 
-esp_mqtt_client_handle_t mqtt_client = NULL;
 static bool mqtt_connected = false;
 
+/* Queue global variables */
+static QueueHandle_t mqtt_event_queue = NULL; 
+static QueueHandle_t mqtt_command_queue = NULL;
 
+/* MQTT client global variables */
+esp_mqtt_client_handle_t mqtt_client = NULL;
+
+/**
+ * @brief Starts the MQTT event queue task.
+ * 
+ * This function creates the MQTT event queue and starts the task responsible for 
+ * handling MQTT publishing requests. The task monitors the queue for events and 
+ * processes them by loading the necessary sensor data from the event and publishing the 
+ * state to MQTT.
+ * 
+ * @return 
+ *      - ESP_OK on success
+ *      - ESP_FAIL if the queue or task creation fails
+ */
+esp_err_t start_mqtt_queue_task(void) {
+
+    // Create the event queue
+    mqtt_event_queue = xQueueCreate(MQTT_QUEUE_LENGTH, sizeof(sensor_event_t));
+    if (mqtt_event_queue == NULL) {
+        ESP_LOGE(TAG, "Failed to create event queue for MQTT sensor reading publishing. Requested size: %d", sizeof(sensor_event_t)*MQTT_QUEUE_LENGTH);
+        return ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "MQTT event queue for sensor reading publishing created successfully. Queue length: %d, item size: %d", MQTT_QUEUE_LENGTH, sizeof(sensor_event_t));
+    }
+    // Start the MQTT event task
+    xTaskCreate(mqtt_event_task, "mqtt_event_task", 8192, NULL, 5, NULL);
+
+    return ESP_OK;
+}
+
+/**
+ * @brief FreeRTOS task to handle MQTT sensor publish events.
+ * 
+ * This task monitors an event queue for sensor publish requests. When an event is 
+ * received, it loads the sensor data from the event and then publishes the state to MQTT using the 
+ * mqtt_publish_sensor_data() function.
+ * 
+ * @param[in] arg Unused task argument.
+ */
+void mqtt_event_task(void *arg) {
+    sensor_event_t event;
+    sensor_data_t sensor_data;
+    esp_err_t err;
+
+    while (1) {
+        // Wait for events to arrive in the queue
+        if (xQueueReceive(mqtt_event_queue, &event, portMAX_DELAY)) {
+            sensor_data = event.sensor_data;
+            ESP_LOGI(TAG, "mqtt_event_task: Recevied MQTT publish message. Sensor data: %.2f Pa", sensor_data.pressure);
+
+            // Publish sensor state to MQTT
+            err = mqtt_publish_sensor_data(&sensor_data);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to publish sensor data to MQTT: %s", esp_err_to_name(err));
+            } else {
+                ESP_LOGI(TAG, "Sensor data published to MQTT successfully");    
+            }
+        }
+    }
+}
+
+/**
+ * @brief Sends a sensor data publish event to the MQTT queue.
+ * 
+ * This function triggers an MQTT publish by sending a sensor event to the 
+ * mqtt_event_queue. The event includes the sensor data to be published.
+ * The event will be processed by the MQTT event task, which will publish the
+ * sensor data to MQTT.
+ * 
+ * @param[in] sensor_data The sensor data to be published.
+ * 
+ * @return 
+ *      - ESP_OK on success
+ *      - ESP_FAIL if the event cannot be sent to the queue
+ */
+esp_err_t  trigger_mqtt_publish(const sensor_data_t *sensor_data) {
+    sensor_event_t event;
+
+    event.sensor_data = *sensor_data;
+
+    ESP_LOGI(TAG, "%s: +-> Pushing MQTT publish event to the queue. Sensor data: %.2f Pa", __func__, event.sensor_data.pressure);
+
+    // Send the event to the MQTT event task
+    if (xQueueSend(mqtt_event_queue, &event, portMAX_DELAY) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to send event to MQTT queue");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+/**
+ * @brief Logs an error message if the provided error code is non-zero.
+ * 
+ * This function checks the provided error code and logs an error message if the code is non-zero. It is used to log detailed error information for MQTT connection errors, especially those related to TLS/SSL
+ * errors. The function is typically called when handling MQTT events to provide more context about the nature of the error.
+ * @param[in] message A descriptive message to include in the log.
+ * @param[in] error_code The error code to check and log if non-zero.
+ * @return None
+ */
 static void log_error_if_nonzero(const char *message, int error_code)
 {
     if (error_code != 0) {
@@ -205,7 +308,15 @@ esp_err_t mqtt_init(void) {
     return ret;
 }
 
-// Function to publish sensor data
+/**
+ * @brief Publishes sensor data to MQTT topics.
+ * 
+ * This function publishes the provided sensor data to MQTT topics based on the configured MQTT prefix and device ID. It checks if MQTT is enabled in the settings and waits for the
+ * MQTT connection to become ready before attempting to publish. Each field of the sensor data is published to a separate MQTT topic.
+ * @param[in] sensor_data The sensor data to be published.
+ * @return ESP_OK if the data was published successfully, or an error code if MQTT is disabled or if the MQTT connection is not ready within the timeout period.
+ * 
+ */
 esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
     uint16_t mqtt_connection_mode;
@@ -236,7 +347,7 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     );
 
     if ((bits & BIT_MQTT_CONNECTED) && (bits & BIT_MQTT_READY)) {
-        ESP_LOGI(TAG, "%s: MQTT connection is ready!", __func__);
+        ESP_LOGD(TAG, "%s: MQTT connection is ready!", __func__);
         // Continue normal operation
     } else {
         ESP_LOGE(TAG, "%s: MQTT never became ready after 10 seconds", __func__);
@@ -261,7 +372,12 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     }
 
     // Create MQTT topics based on mqtt_prefix and device_id
-    char topic_voltage[256], topic_voltage_raw[256], topic_voltage_offset[256], topic_pressure[256], topic_multiplier[256], topic_state[256];
+    char topic_voltage[MQTT_TOPIC_SENSOR_VALUE_MAX_LEN], \
+        topic_voltage_raw[MQTT_TOPIC_SENSOR_VALUE_MAX_LEN], \
+        topic_voltage_offset[MQTT_TOPIC_SENSOR_VALUE_MAX_LEN], \
+        topic_pressure[MQTT_TOPIC_SENSOR_VALUE_MAX_LEN], \
+        topic_multiplier[MQTT_TOPIC_SENSOR_VALUE_MAX_LEN], \
+        topic_state[MQTT_TOPIC_SENSOR_VALUE_MAX_LEN];
     snprintf(topic_voltage, sizeof(topic_voltage), "%s/%s/%s/voltage", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
     snprintf(topic_voltage_raw, sizeof(topic_voltage_raw), "%s/%s/%s/voltage_raw", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
     snprintf(topic_voltage_offset, sizeof(topic_voltage_offset), "%s/%s/%s/voltage_offset", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
@@ -272,11 +388,11 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     // Publish each sensor data field separately
     int msg_id;
     bool is_error = false;
-    char value[32];
+    char value[SENSOR_VALUE_STRING_MAX_LEN];
 
     // Publish voltage
     snprintf(value, sizeof(value), "%.3f", sensor_data->voltage);
-    msg_id = esp_mqtt_client_publish(mqtt_client, topic_voltage, value, 0, 1, 0);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic_voltage, value, 0, MQTT_QOS_PUBLISH, 0);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Topic %s not published", topic_voltage);
         is_error = true;
@@ -284,7 +400,7 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
     // Publish voltage_raw
     snprintf(value, sizeof(value), "%d", sensor_data->voltage_raw);
-    msg_id = esp_mqtt_client_publish(mqtt_client, topic_voltage_raw, value, 0, 1, 0);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic_voltage_raw, value, 0, MQTT_QOS_PUBLISH, 0);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Topic %s not published", topic_voltage_raw);
         is_error = true;
@@ -292,7 +408,7 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
     // Publish voltage_offset
     snprintf(value, sizeof(value), "%.3f", sensor_data->voltage_offset);
-    msg_id = esp_mqtt_client_publish(mqtt_client, topic_voltage_offset, value, 0, 1, 0);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic_voltage_offset, value, 0, MQTT_QOS_PUBLISH, 0);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Topic %s not published", topic_voltage_offset);
         is_error = true;
@@ -300,7 +416,7 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
     // Publish pressure
     snprintf(value, sizeof(value), "%.2f", sensor_data->pressure);
-    msg_id = esp_mqtt_client_publish(mqtt_client, topic_pressure, value, 0, 1, 0);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic_pressure, value, 0, MQTT_QOS_PUBLISH, 0);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Topic %s not published", topic_pressure);
         is_error = true;
@@ -308,7 +424,7 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
 
     // Publish sensor_linear_multiplier
     snprintf(value, sizeof(value), "%lu", (unsigned long)sensor_data->sensor_linear_multiplier);
-    msg_id = esp_mqtt_client_publish(mqtt_client, topic_multiplier, value, 0, 1, 0);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic_multiplier, value, 0, MQTT_QOS_PUBLISH, 0);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Topic %s not published", topic_multiplier);
         is_error = true;
@@ -323,7 +439,7 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     char *sensor_data_json = serialize_sensor_state(&s_data);
     if (sensor_data_json != NULL) {
         ESP_LOGI(TAG, "Sensor data serialized:\n%s", sensor_data_json);
-        msg_id = esp_mqtt_client_publish(mqtt_client, topic_state, sensor_data_json, 0, 0, true);
+        msg_id = esp_mqtt_client_publish(mqtt_client, topic_state, sensor_data_json, 0, MQTT_QOS_PUBLISH, true);
         if (msg_id < 0) {
             ESP_LOGW(TAG, "Topic %s not published", topic_state);
             is_error = true;
@@ -343,7 +459,9 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     }
 }
 
-// Call this function when you are shutting down the application or no longer need the MQTT client
+/**
+ * @brief Cleans up the MQTT client resources.
+ */
 void cleanup_mqtt() {
     if (mqtt_client) {
         mqtt_connected = false;
@@ -388,9 +506,9 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
         return ESP_FAIL;
     }
     
-    char topic[512];
-    char payload[512];
-    char discovery_path[256];
+    char topic[MQTT_TOPIC_HA_INTEGRATION_MAX_LEN];
+    char payload[MQTT_PAYLOAD_HA_INTEGRATION_MAX_LEN];
+    char discovery_path[MQTT_TOPIC_SENSOR_VALUE_MAX_LEN];
     int msg_id;
     bool is_error = false;
     char *metric;
@@ -419,7 +537,7 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
     sprintf(discovery_path, "%s/%s", homeassistant_prefix, HA_DEVICE_FAMILY);
     sprintf(topic, "%s/%s/%s/%s", discovery_path, device_id, metric, HA_DEVICE_CONFIG_PATH);
 
-    msg_id = esp_mqtt_client_publish(mqtt_client, topic, discovery_json, 0, 1, 0);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic, discovery_json, 0, MQTT_QOS_PUBLISH, 0);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Discovery topic %s not published", topic);
         is_error = true;
@@ -456,7 +574,7 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
     sprintf(discovery_path, "%s/%s", homeassistant_prefix, HA_DEVICE_FAMILY);
     sprintf(topic, "%s/%s/%s/%s", discovery_path, device_id, metric, HA_DEVICE_CONFIG_PATH);
 
-    msg_id = esp_mqtt_client_publish(mqtt_client, topic, discovery_json, 0, 1, 0);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic, discovery_json, 0, MQTT_QOS_PUBLISH, 0);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "Discovery topic %s not published", topic);
         is_error = true;
@@ -498,6 +616,11 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
 
 /**
  * @brief Task to periodically publish Home Assistant discovery configuration for the device and its sensors
+ * 
+ * This FreeRTOS task periodically publishes the Home Assistant discovery configuration for the device and its sensors. It reads the MQTT prefix, device ID, Home Assistant prefix, and update interval from NVS, and then enters a loop where it calls
+ * mqtt_publish_home_assistant_config() to publish the discovery configuration. The task waits for the defined update interval before publishing the configuration again, allowing Home Assistant to stay updated with any changes in the device configuration or sensor metrics.
+ * @param param Unused task parameter.
+ * @return None
  */
 void mqtt_device_config_task(void *param) {
     char *device_id = NULL;

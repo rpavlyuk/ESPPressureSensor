@@ -480,7 +480,7 @@ esp_err_t ha_entity_discovery_fullfill(ha_entity_discovery_t *discovery, const c
     snprintf(discovery->json_attributes_topic, json_attr_topic_len, "%s/%s/%s", mqtt_prefix, device_id, HA_DEVICE_STATE_PATH_SENSOR);
 
     // Allocate memory for unique_id and format it
-    discovery->unique_id = (char *)malloc(strlen(device_id) + strlen(device_serial) + strlen(metric) + 3);  // +3 for two '_' and null terminator
+    discovery->unique_id = (char *)malloc(strlen(device_id) + strlen(metric) + 2);  // +2 for '_' and null terminator
     if (discovery->unique_id == NULL) {
         ESP_LOGE(TAG, "Failed to allocate memory for unique_id");
         free(device_id);
@@ -488,7 +488,7 @@ esp_err_t ha_entity_discovery_fullfill(ha_entity_discovery_t *discovery, const c
         free(discovery->object_id);
         return ESP_ERR_NO_MEM;
     }
-    sprintf(discovery->unique_id, "%s_%s_%s", device_id, device_serial, metric);
+    sprintf(discovery->unique_id, "%s_%s", device_id, metric);
 
     // Allocate memory for name and format it
     discovery->name = (char *)malloc(strlen(metric) + 1);  // +1 for null terminator

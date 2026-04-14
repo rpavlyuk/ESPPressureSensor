@@ -15,6 +15,8 @@
 
 #define REBOOT_ON_SENSOR_FAILURE true
 
+#define SENSOR_VALUE_STRING_MAX_LEN 32  // Max length for string representation of sensor values (e.g., "123.45")
+
 /**
  * Sensor readings information
  */

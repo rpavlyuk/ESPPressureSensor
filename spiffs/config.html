@@ -30,7 +30,8 @@
         </header>
     </div>
     <div class="container">
-    <h3>Device: {VAL_DEVICE_ID}</h3>
+    <h4>ESP32 Pressure Sensor Configuration</h4>
+    <h5>Device: {VAL_DEVICE_ID}</h5>
     <h5>Device Serial: {VAL_DEVICE_SERIAL}</h5>
     <h5 id="cfg_msg">{VAL_MESSAGE}</h5>
     <div id="cfg_save_msg"></div>
@@ -145,7 +146,57 @@
         </tbody>
       </table>
 
+    <br/>
+    <h3>Device Reset</h3>
+    <p><strong>Danger Zone:</strong> Some of the operations from the list may cause connectivity loss.<br/>A device reboot will be triggered automatically after any reset action.</p>
+    <table>
+      <tbody>
+        <tr>
+          <td>
+            <!-- Reset button -->
+            <form action="/reset" method="POST" onsubmit="return confirmReset('Reset the device to the factory settings. All settings will be lost, including Wi-Fi credentials. Are you sure you want to reset the device?')">
+              <input type="hidden" name="action" value="0">
+              <input type="hidden" name="device_serial" value="{VAL_DEVICE_SERIAL}">
+              <input type="hidden" name="device_id" value="{VAL_DEVICE_ID}">
+              <input type="submit" value="Reset Device">
+            </form>
+          </td>
+          <td>
+            <p>Reset the device to the <strong>factory settings</strong>. All the settings will be lost, including Wi-Fi settings.<br/>Wi-Fi provisioning will be required to enable device connectivity.</p>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <!-- Reset button -->
+            <form action="/reset" method="POST" onsubmit="return confirmReset('Reset all device settings except Wi-Fi credentials. Are you sure you want to reset settings?')">
+              <input type="hidden" name="action" value="1">
+              <input type="hidden" name="device_serial" value="{VAL_DEVICE_SERIAL}">
+              <input type="hidden" name="device_id" value="{VAL_DEVICE_ID}">
+              <input type="submit" value="Reset Settings">
+            </form>
+          </td>
+          <td>
+            <p>Reset the device settings, except Wi-Fi credentials.</p>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <!-- Reset button -->
+            <form action="/reset" method="POST" onsubmit="return confirmReset('Reset only Wi-Fi settings, keeping other settings intact. Are you sure you want to reset Wi-Fi?')">
+              <input type="hidden" name="action" value="2">
+              <input type="hidden" name="device_serial" value="{VAL_DEVICE_SERIAL}">
+              <input type="hidden" name="device_id" value="{VAL_DEVICE_ID}">
+              <input type="submit" value="Reset Wi-Fi">
+            </form>
+          </td>
+          <td>
+            <p>Reset device Wi-Fi settings, but keep other device settings intact.<br/>Wi-Fi provisioning will be required to enable device connectivity.<br/>Use this option if you'd like to connect the device to a new/other Wi-Fi network.</p>
+          </td>
+        </tr>
+      </tbody>
+    </table>
 
+    <!-- End of main content container -->
     </div>
 
     <div class="container">

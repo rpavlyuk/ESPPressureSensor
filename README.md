@@ -1,5 +1,6 @@
 [![Stand With Ukraine](https://raw.githubusercontent.com/vshymanskyy/StandWithUkraine/main/badges/StandWithUkraine.svg)](https://stand-with-ukraine.pp.ua)
 [![Made in Ukraine](https://img.shields.io/badge/Made_in-Ukraine-ffd700.svg?labelColor=0057b7)](https://stand-with-ukraine.pp.ua)
+![Made in Poland](https://img.shields.io/badge/Made_in-Poland-red?logoColor=white&labelColor=white)
 
 # ESP32 Pressure Sensor Firmware
 
@@ -9,15 +10,17 @@ This project provides firmware for an ESP32-based pressure sensor system using t
 ### Features
 - **WiFi Connectivity**: Supports connecting to WiFi for remote monitoring.
 - **MQTT Support**: Publishes sensor data via MQTT for integration with various platforms.
-- **Home Assistant Integration**: Automatically detects and configures the sensor in Home Assistant.
 - **Web Interface**: Provides a web-based user interface for configuration and monitoring.
+- **Home Assistant Integration**: Automatically detects and configures devices in Home Assistant using auto-discovery via MQTT.
+- **Web API**: Simple JSON API is in place should you want to integrate the device into your custom infractucture projects.
+- **OTA (over the air) Firmware Update**: Trigger firmware update via WEB interface from a provided URL.
 - **Zigbee (Experimental)**: Zigbee functionality is present but currently disabled by default.
 
 ## Prerequisites
 To get started, you will need:
 - **Hardware**:
-  - ESP32-C6 or ESP32-S3 microcontroller (both have been tested).
-  - DFRobot SEN0257 pressure sensor.
+  - ESP32-C6 (recommended) or ESP32-S3 microcontroller (both have been tested).
+  - [DFRobot SEN0257](https://www.dfrobot.com/product-1675.html) pressure sensor or similar (will require progrem-level recalibration)
 - **Software**:
   - ESP-IDF framework (version 5.5 or higher, v6.0 is recommended).
 
@@ -49,8 +52,12 @@ You may consider the other IO pin so you can change `PRESSURE_SENSOR_PIN` in fil
    ```
 3. **Initiate ESP-IDF**:
   This will map the source folder to ESP-IDF framework and will enable all needed global variables.
+   ```
+   source $HOME/.espressif/tools/activate_idf_v6.0.sh
+   ```
+   Old style approach (pre-[EIM](https://docs.espressif.com/projects/idf-im-ui/en/latest/) installations of ESP-IDF):
    ```bash
-   . $HOME/esp-idf/export.sh
+   . $HOME/esp/esp-idf/export.sh
    ```
 4. **Build the firmware**:
    ```bash
@@ -82,7 +89,6 @@ You may consider the other IO pin so you can change `PRESSURE_SENSOR_PIN` in fil
   * *Component config → ESP System Settings -> Main task stack size* to `4096`
   * *Component config → ESP System Settings -> Minimal allowed size for shared stack* to `2048`
 
-
 ## Initiation
 ### WiFi Setup
 * On the first boot, the device will start in access point mode with the SSID `PROV_AP_XXXXXX`. The exact named will be different depending on the device hardware ID (which is built in). The password is SSID name plus `1234`. For example, `PROV_AP_XXXXXX1234`
@@ -110,6 +116,9 @@ You may consider the other IO pin so you can change `PRESSURE_SENSOR_PIN` in fil
   * `Sensor ADC Offset (V)`: calibration parameter. It represents which voltage corresponds to a zero pressure. We will explain calibration in separate section.
   * `Sensor Linear Multiplier`: this is a linear multiplier (dependency) between voltage in Volts and pressure in Pascals. No need to change it unless you know why.
   * `Number of samples to collect per measurement`, `Interval between samples (ms)`, `Threshold for samples filtering (%)`: these are advanced measurement sampling parameters. The device implements smart measurement when collects N samples of voltage (ADC) per one measurement with certain small interval, calculates the mediane and drops all other then deviate from median by certain threshold.
+* System Update:
+  * `OTA Update URL`: A URL pointing to `.bin` file with the firmware which you want to update the system to. See section *OTA Firmware Update* below for details. The UI client will also try to check if there's new version at the provided URL but looking for `build_info.json` file in the same directory as firmware file.
+  * `OTA Update Reset Config`: Reset device configuration (except Wi-Fi) once OTA is performed. Useful when data model has been migrated.
 
 ## Calibration
 1. Connect the pressure sensor to ESP32 device and leave it open. Means, do not mount it into the tank or pipe.
