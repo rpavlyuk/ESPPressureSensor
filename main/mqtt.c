@@ -23,6 +23,10 @@ static QueueHandle_t mqtt_command_queue = NULL;
 /* MQTT client global variables */
 esp_mqtt_client_handle_t mqtt_client = NULL;
 
+/* LWT message and topic global variables */
+static char *s_mqtt_lwt_msg = NULL;
+static char s_mqtt_lwt_topic[MQTT_TOPIC_SENSOR_VALUE_MAX_LEN];
+
 /**
  * @brief Starts the MQTT event queue task.
  * 
@@ -96,7 +100,7 @@ void mqtt_event_task(void *arg) {
  *      - ESP_OK on success
  *      - ESP_FAIL if the event cannot be sent to the queue
  */
-esp_err_t  trigger_mqtt_publish(const sensor_data_t *sensor_data) {
+esp_err_t trigger_mqtt_publish(const sensor_data_t *sensor_data) {
     sensor_event_t event;
 
     event.sensor_data = *sensor_data;
@@ -247,9 +251,29 @@ esp_err_t mqtt_init(void) {
     snprintf(broker_url, sizeof(broker_url), "%s://%s:%d", mqtt_protocol, mqtt_server, mqtt_port);
     ESP_LOGI(TAG, "MQTT Broker URL: %s", broker_url);
 
+    if (s_mqtt_lwt_msg == NULL) {
+        s_mqtt_lwt_msg = ha_availability_entry_print_JSON("offline");
+        if (s_mqtt_lwt_msg == NULL) {
+            ESP_LOGE(TAG, "Failed to build MQTT LWT message");
+            return ESP_FAIL;
+        } else {
+            ESP_LOGI(TAG, "MQTT LWT message built successfully: %s", s_mqtt_lwt_msg);
+        }
+    } else {
+        ESP_LOGI(TAG, "MQTT LWT message already built: %s", s_mqtt_lwt_msg);
+    }
+
+    snprintf(s_mqtt_lwt_topic, sizeof(s_mqtt_lwt_topic), "%s/%s/%s",
+            mqtt_prefix, device_id, HA_DEVICE_STATUS_PATH);
+
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = broker_url,
-        .network.timeout_ms = 5000,  // Increase timeout if needed
+        .network.timeout_ms = 5000,
+        .session.last_will.topic = s_mqtt_lwt_topic,
+        .session.last_will.msg = s_mqtt_lwt_msg,
+        .session.last_will.msg_len = 0,
+        .session.last_will.qos = MQTT_QOS_PUBLISH,
+        .session.last_will.retain = true
     };
 
     if (mqtt_user[0]) {
@@ -258,6 +282,7 @@ esp_err_t mqtt_init(void) {
     if (mqtt_password[0]) {
         mqtt_cfg.credentials.authentication.password = mqtt_password;
     }
+
     if (strcmp(mqtt_protocol,"mqtts") == 0) {
         // Load the CA certificate
         char *ca_cert = NULL;
@@ -265,6 +290,12 @@ esp_err_t mqtt_init(void) {
             ESP_LOGW(TAG, "Failed to load CA certificate");
             if (strcmp(mqtt_protocol,"mqtts") == 0) {
                 ESP_LOGE(TAG, "MQTTS protocol cannot be managed without CA certificate.");
+                free(mqtt_server);
+                free(mqtt_protocol);
+                free(mqtt_user);
+                free(mqtt_password);
+                free(mqtt_prefix);
+                free(device_id);
                 return ESP_FAIL;
             }
         } else {
@@ -557,6 +588,7 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
         is_error = true;
     }
     ha_entity_discovery_free(entity_discovery);
+    free(ha_availability_entry_json);
 
     /* Voltage */
     unit = "V";
