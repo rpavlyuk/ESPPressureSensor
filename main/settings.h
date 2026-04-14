@@ -61,9 +61,9 @@ extern int device_ready;
 /**
  * General constants
  */
-#define S_NAMESPACE         "settings"
-
+#define S_NAMESPACE           "settings"
 #define S_DEVICE_FAMILY       "sensor"
+#define WIFI_NAMESPACE        "nvs.net80211"
 
 /**
  * Settings keys
@@ -134,7 +134,7 @@ extern int device_ready;
 #define S_DEFAULT_SENSOR_SAMPLING_MEDIAN_DEVIATION      10  // Threshold percentage for filtering
 
 #define S_DEFAULT_OTA_UPDATE_URL \
-    "https://dist-repo-public.s3.eu-central-1.amazonaws.com/firmware/ESPPressureSensor/" CONFIG_IDF_TARGET "/latest/ESPPressureSensor.bin"
+    "https://dist-repo-public.s3.eu-central-1.amazonaws.com/firmware/ESPPressureSensor/" CONFIG_IDF_TARGET "/latest/ESPZPressureSensor.bin"
 #define S_DEFAULT_OTA_UPDATE_RESET_CONFIG       0   // 0 - Do not reset config, 1 - Reset config to defaults (except Wi-Fi) before applying update. 
     // This can be useful if the device becomes inaccessible due to misconfiguration and you want to ensure that the new firmware will be applied with default settings.
 
@@ -334,5 +334,49 @@ esp_err_t system_reboot();
  * @brief: Task to reboot the device in async mode
  */
 void system_reboot_task(void *param);
+
+/* OTA Update routines */
+/**
+ * @brief: Call OTA update
+ */
+esp_err_t perform_ota_update(const char *url);
+
+/**
+ * @brief: Generate the storage update URL
+ */
+esp_err_t generate_storage_update_url(const char *firmware_url, char **storage_url);
+
+/**
+ * @brief: Download and update the SPIFFS partition
+ */
+esp_err_t download_and_update_spiffs_partition(const char *url);
+
+/**
+ * @brief: Check if the OTA partitions are valid
+ */
+esp_err_t check_ota_partitions(void);
+
+/**
+ * @brief: OTA update task
+ */
+void ota_update_task(void *param);
+
+/* System Control routines*/
+
+/**
+ * @brief: Reset factory settings
+ */
+esp_err_t reset_factory_settings();
+
+/**
+ * @brief: Reset device settings
+ */
+esp_err_t reset_device_settings();
+
+/**
+ * @brief: Reset WiFi settings
+ */
+esp_err_t reset_wifi_settings();
+
 
 #endif

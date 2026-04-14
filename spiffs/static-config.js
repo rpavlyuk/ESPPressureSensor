@@ -534,10 +534,10 @@ $(function () {
   }
 
   function checkForNewFirmware() {
-    if (!window.RelayBoardConfig) return;
+    if (!window.PressureSensorConfig) return;
 
-    const curVer = (window.RelayBoardConfig.swVersionNum || "").trim();
-    const curBuild = normalizeBuildNum(window.RelayBoardConfig.swBuildNum);
+    const curVer = (window.PressureSensorConfig.swVersionNum || "").trim();
+    const curBuild = normalizeBuildNum(window.PressureSensorConfig.swBuildNum);
 
     const otaUrl = ($("#ota_update_url").val() || "").trim();
     if (!otaUrl) {
@@ -649,13 +649,13 @@ function submitOtaUpdate() {
   const curVer = document.createElement("input");
   curVer.type = "hidden";
   curVer.name = "current_sw_version";
-  curVer.value = window.RelayBoardConfig?.swVersionNum || "";
+  curVer.value = window.PressureSensorConfig?.swVersionNum || "";
   form.appendChild(curVer);
 
   const curBuild = document.createElement("input");
   curBuild.type = "hidden";
   curBuild.name = "current_sw_build";
-  curBuild.value = window.RelayBoardConfig?.swBuildNum || "";
+  curBuild.value = window.PressureSensorConfig?.swBuildNum || "";
   form.appendChild(curBuild);
 
   // --- NEW version (important) ---

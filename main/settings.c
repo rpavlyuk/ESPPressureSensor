@@ -6,8 +6,15 @@
 #include "esp_spiffs.h"  // Include for SPIFFS
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
+#include "esp_http_client.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+
+#include "esp_ota_ops.h"
+#include "esp_https_ota.h"
 
 #include "non_volatile_storage.h"
+#include "ca_cert_manager.h"
 
 #include "esp_wifi.h"
 
@@ -17,6 +24,8 @@
 #include "sensor.h"
 #include "web.h"
 
+#define BUFFSIZE 1024
+static char ota_write_data[BUFFSIZE + 1] = { 0 };
 const size_t s_settings_count = sizeof(s_settings)/sizeof(s_settings[0]);
 
 /*
@@ -1407,4 +1416,506 @@ static esp_err_t handle_setting_sensor_smp_deviate(const char *key, const cJSON 
     }
 
     return ESP_OK; // generic writer will store it
+}
+
+/* OTA Update routines */
+/**
+ * @brief Perform an OTA update from the given URL.
+ *
+ * This function initiates an OTA update process using the URL provided.
+ * It configures the OTA client, downloads the firmware, and flashes it to the device.
+ * Upon successful completion, the device will automatically reboot.
+ *
+ * @param url The URL of the firmware binary to download.
+ * @return ESP_OK if the OTA update was successful, or an error code otherwise.
+ */
+esp_err_t perform_ota_update(const char *url) {
+    ESP_LOGI(OTA_TAG, "Starting OTA update from URL: %s", url);
+    
+    char *ca_cert = NULL;
+    
+    // Load the CA root certificate
+    if (load_ca_certificate(&ca_cert, CA_CERT_PATH_HTTPS) != ESP_OK) {
+        ESP_LOGW(OTA_TAG, "Failed to load CA certificate. Proceeding without it.");
+    }
+
+    // Configure HTTP client for OTA update
+    esp_http_client_config_t ota_https_client_config = {
+        .url = url,
+        .timeout_ms = 5000,  // Timeout for OTA update
+        .cert_pem = ca_cert  // Set CA certificate if loaded, otherwise NULL
+    };
+
+    // Configure OTA update
+    esp_https_ota_config_t ota_config = {
+        .http_config = &ota_https_client_config,
+    };
+
+    // Start the OTA update process
+    esp_err_t ret = esp_https_ota(&ota_config);
+    
+    if (ret == ESP_OK) {
+        ESP_LOGI(OTA_TAG, "OTA firmware image update successful!");
+    } else {
+        ESP_LOGE(OTA_TAG, "OTA firmware image update failed: %s", esp_err_to_name(ret));
+    }
+
+    // Free the CA certificate memory if it was dynamically allocated
+    if (ca_cert) {
+        free(ca_cert);
+    }
+
+    return ret;
+}
+
+/**
+ * @brief Generate OTA Storage Update URL based on the OTA Firmware Update URL.
+ *
+ * This function extracts the base path from the OTA Firmware Update URL and appends "Storage.bin".
+ *
+ * @param firmware_url The OTA Firmware Update URL.
+ * @param[out] storage_url Pointer to dynamically allocated string containing the OTA Storage Update URL.
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if inputs are invalid, ESP_ERR_NO_MEM if memory allocation fails.
+ */
+esp_err_t generate_storage_update_url(const char *firmware_url, char **storage_url) {
+    if (firmware_url == NULL || storage_url == NULL) {
+        ESP_LOGE(OTA_TAG, "Invalid arguments");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Find the last '/' in the firmware URL to extract the base path
+    const char *last_slash = strrchr(firmware_url, '/');
+    if (last_slash == NULL) {
+        ESP_LOGE(OTA_TAG, "Malformed URL: %s", firmware_url);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Calculate the base URL length (everything up to and including the last '/')
+    size_t base_length = last_slash - firmware_url + 1;
+
+    // Allocate memory for the new URL (base length + OTA_STORAGE_IMAGE_NAME + null terminator)
+    *storage_url = malloc(base_length + strlen(OTA_STORAGE_IMAGE_NAME) + 1);
+    if (*storage_url == NULL) {
+        ESP_LOGE(OTA_TAG, "Memory allocation failed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Copy the base URL and append OTA_STORAGE_IMAGE_NAME
+    strncpy(*storage_url, firmware_url, base_length);
+    strcpy(*storage_url + base_length, OTA_STORAGE_IMAGE_NAME);
+
+    ESP_LOGI(OTA_TAG, "Generated Storage Update URL: %s", *storage_url);
+    return ESP_OK;
+}
+
+/**
+ * @brief Download and update the SPIFFS partition with the data from the given URL.
+ *
+ * This function downloads the partition image from the given URL and writes it to the SPIFFS.
+ *
+ * @param url The URL of the storage partition image to download.
+ * @return ESP_OK if the SPIFFS partition was updated successfully, or an error code otherwise.
+ */
+esp_err_t download_and_update_spiffs_partition(const char *url)
+{
+    ESP_LOGI(OTA_TAG, "Starting OTA storage update from URL: %s", url);
+
+    esp_partition_t *spiffs_partition = NULL;
+    esp_partition_iterator_t it = esp_partition_find(
+        ESP_PARTITION_TYPE_DATA,
+        ESP_PARTITION_SUBTYPE_DATA_SPIFFS,
+        NULL
+    );
+
+    if (it == NULL) {
+        ESP_LOGE(OTA_TAG, "SPIFFS partition not found");
+        return ESP_FAIL;
+    }
+
+    spiffs_partition = (esp_partition_t *)esp_partition_get(it);
+    if (spiffs_partition == NULL) {
+        ESP_LOGE(OTA_TAG, "Failed to get SPIFFS partition");
+        esp_partition_iterator_release(it);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(OTA_TAG, "SPIFFS: partition type = %d", spiffs_partition->type);
+    ESP_LOGI(OTA_TAG, "SPIFFS: partition subtype = %d", spiffs_partition->subtype);
+    ESP_LOGI(OTA_TAG, "SPIFFS: partition starting address = 0x%lx", spiffs_partition->address);
+    ESP_LOGI(OTA_TAG, "SPIFFS: partition size = %li", spiffs_partition->size);
+    ESP_LOGI(OTA_TAG, "SPIFFS: partition label = %s", spiffs_partition->label);
+    ESP_LOGI(OTA_TAG, "SPIFFS: partition encrypted = %d", spiffs_partition->encrypted);
+
+    esp_partition_iterator_release(it);
+
+    char *ca_cert = NULL;
+    if (load_ca_certificate(&ca_cert, CA_CERT_PATH_HTTPS) != ESP_OK) {
+        ESP_LOGW(OTA_TAG, "Failed to load CA certificate. Proceeding without it.");
+    }
+
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = 5000,
+        .cert_pem = ca_cert,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(OTA_TAG, "Failed to initialize HTTP client");
+        free(ca_cert);
+        return ESP_FAIL;
+    }
+
+    /*
+     * Step 1: HEAD request to verify the object exists
+     */
+    esp_http_client_set_method(client, HTTP_METHOD_HEAD);
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(OTA_TAG, "Failed to open HEAD HTTP connection: %s", esp_err_to_name(err));
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return err;
+    }
+    ESP_LOGI(OTA_TAG, "SPIFFS OTA: HEAD HTTP connection opened successfully");
+
+    int64_t head_len = esp_http_client_fetch_headers(client);
+    if (head_len < 0) {
+        ESP_LOGE(OTA_TAG, "Failed to fetch HEAD HTTP headers");
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(OTA_TAG, "SPIFFS OTA: HEAD HTTP headers fetched successfully");
+
+    if (esp_http_client_get_status_code(client) != 200) {
+        ESP_LOGE(OTA_TAG, "File not found at URL: %s, HTTP status=%d",
+                 url, esp_http_client_get_status_code(client));
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(OTA_TAG, "SPIFFS OTA: File found at URL: %s", url);
+
+    esp_http_client_cleanup(client);
+    client = NULL;
+
+    /*
+     * Step 2: GET request to download the file
+     */
+    client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(OTA_TAG, "Failed to reinitialize HTTP client");
+        free(ca_cert);
+        return ESP_FAIL;
+    }
+
+    esp_http_client_set_method(client, HTTP_METHOD_GET);
+
+    err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(OTA_TAG, "Failed to open GET HTTP connection: %s", esp_err_to_name(err));
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return err;
+    }
+    ESP_LOGI(OTA_TAG, "SPIFFS OTA: GET HTTP connection opened successfully");
+
+    int64_t content_length = esp_http_client_fetch_headers(client);
+    if (content_length < 0) {
+        ESP_LOGE(OTA_TAG, "Failed to fetch GET HTTP headers");
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    if (esp_http_client_get_status_code(client) != 200) {
+        ESP_LOGE(OTA_TAG, "GET failed for URL: %s, HTTP status=%d",
+                 url, esp_http_client_get_status_code(client));
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(OTA_TAG, "SPIFFS OTA: GET headers fetched successfully, content_length=%lld",
+             content_length);
+
+    if (content_length <= 0) {
+        ESP_LOGE(OTA_TAG, "Invalid content length: %lld", content_length);
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    /*
+     * Step 3: Read first chunk BEFORE erasing partition
+     */
+    int data_read = esp_http_client_read(client, ota_write_data, BUFFSIZE);
+    if (data_read < 0) {
+        ESP_LOGE(OTA_TAG, "Error reading first chunk from HTTP stream");
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    if (data_read == 0) {
+        ESP_LOGE(OTA_TAG, "HTTP stream returned 0 bytes, aborting before erasing SPIFFS");
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    /*
+     * Step 4: Erase only after we know we really have data
+     */
+    err = esp_partition_erase_range(spiffs_partition, 0, spiffs_partition->size);
+    if (err != ESP_OK) {
+        ESP_LOGE(OTA_TAG, "Failed to erase SPIFFS partition: %s", esp_err_to_name(err));
+        free(ca_cert);
+        esp_http_client_cleanup(client);
+        return err;
+    }
+    ESP_LOGI(OTA_TAG, "SPIFFS partition erased successfully");
+
+    /*
+     * Step 5: Write first chunk and continue streaming
+     */
+    int binary_file_length = 0;
+    int offset = 0;
+
+    ESP_LOGI(OTA_TAG, "Writing to SPIFFS partition:");
+
+    while (1) {
+        if (data_read > 0) {
+            err = esp_partition_write(spiffs_partition, offset, ota_write_data, data_read);
+            if (err != ESP_OK) {
+                ESP_LOGE(OTA_TAG, "Failed to write SPIFFS partition: %s", esp_err_to_name(err));
+                free(ca_cert);
+                esp_http_client_cleanup(client);
+                return err;
+            }
+
+            offset += data_read;
+            binary_file_length += data_read;
+            printf(".");
+        } else if (data_read == 0) {
+            printf("DONE\n");
+            ESP_LOGI(OTA_TAG, "Connection closed, all data received");
+            break;
+        }
+
+        data_read = esp_http_client_read(client, ota_write_data, BUFFSIZE);
+        if (data_read < 0) {
+            ESP_LOGE(OTA_TAG, "Error: SSL/HTTP data read error");
+            free(ca_cert);
+            esp_http_client_cleanup(client);
+            return ESP_FAIL;
+        }
+    }
+
+    ESP_LOGI(OTA_TAG, "Total written binary data length: %d", binary_file_length);
+
+    if (binary_file_length <= 0) {
+        ESP_LOGE(OTA_TAG, "No data written to SPIFFS partition");
+        err = ESP_FAIL;
+    } else if (content_length > 0 && binary_file_length != content_length) {
+        ESP_LOGE(OTA_TAG, "Incomplete SPIFFS image: expected %lld bytes, wrote %d bytes",
+                 content_length, binary_file_length);
+        err = ESP_FAIL;
+    } else {
+        ESP_LOGI(OTA_TAG, "SPIFFS partition update completed successfully");
+        err = ESP_OK;
+    }
+
+    esp_http_client_cleanup(client);
+    free(ca_cert);
+    return err;
+}
+
+/**
+ * @file: settings.c
+ * @brief Check the OTA partitions for the current running partition and its state.
+ * 
+ * This function checks the OTA partitions to determine the current running partition
+ * and its state. It prints the running partition label and the OTA state to the console.
+ * 
+ * @return ESP_OK if the OTA partitions were checked successfully, or an error code otherwise.
+ */
+esp_err_t check_ota_partitions(void) {
+
+    ESP_LOGI(OTA_TAG, "Checking OTA partitions");
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    if (running == NULL) {
+        ESP_LOGE(OTA_TAG, "Running partition not found!");
+        return ESP_ERR_OTA_BASE;
+    } else {
+        ESP_LOGI(OTA_TAG, "Running from partition: %s", running->label);
+    }
+
+    esp_ota_img_states_t ota_state;
+    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
+        ESP_LOGI(OTA_TAG, "OTA partition state: %d", ota_state);
+    } else {
+        ESP_LOGE(OTA_TAG, "Failed to get OTA state");
+    }
+
+    return ESP_OK;
+}
+
+/**
+ * @brief: OTA update task
+ * 
+ * @param param: Pointer to the OTA update parameters
+ * 
+ * @note: This function should be called as a FreeRTOS task
+ */
+void ota_update_task(void *param) {
+
+#if _DEVICE_ENABLE_STATUS_MEMGUARD
+    // Store current memory guard mode
+    uint16_t current_memguard_mode = S_DEFAULT_STATUS_MEMGUARD_MODE;
+    if (nvs_read_uint16(S_NAMESPACE, S_KEY_STATUS_MEMGUARD_MODE, &current_memguard_mode) != ESP_OK) {
+        ESP_LOGW(OTA_TAG, "Failed to read current memory guard mode from NVS");
+    } else {
+        ESP_LOGD(OTA_TAG, "Current memory guard mode: %i", current_memguard_mode);
+    }
+    // Disable memory guard for OTA update task
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_STATUS_MEMGUARD_MODE, MEMGRD_MODE_DISABLED)); // Disable memguard
+    ESP_LOGI(OTA_TAG, "Memory guard disabled for OTA update task");
+#endif
+    ota_update_param_t *update_param = (ota_update_param_t *)param;
+    esp_err_t ret = perform_ota_update(update_param->ota_url);
+    
+    // Check the result and handle any post-update logic
+    if (ret == ESP_OK) {
+        if(DO_OTA_STORAGE_UPDATE) {
+            ESP_LOGI(OTA_TAG, "Performing SPIFFS image update after OTA firmware image update...");
+            char *storage_url = NULL;
+            if (generate_storage_update_url(update_param->ota_url, &storage_url) == ESP_OK) {
+                ESP_LOGI(OTA_TAG, "SPIFFS Update URL: %s", storage_url);
+                ret = download_and_update_spiffs_partition(storage_url);
+                if (ret == ESP_OK) {
+                    ESP_LOGI(OTA_TAG, "SPIFFS partition updated successfully.");
+                } else {
+                    ESP_LOGE(OTA_TAG, "Failed to update SPIFFS partition: %s", esp_err_to_name(ret));
+                }
+                free(storage_url);
+            } else {
+                ESP_LOGE(OTA_TAG, "Failed to generate SPIFFS Update URL");
+            }
+        }
+#if _DEVICE_ENABLE_STATUS_MEMGUARD
+        // Restore previous memory guard mode
+        ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_STATUS_MEMGUARD_MODE, current_memguard_mode));
+        ESP_LOGI(OTA_TAG, "Memory guard mode restored to %i", current_memguard_mode);
+
+#endif
+        // Reset device configuration if required
+        // 1 - get reset mode from NV
+        uint16_t ota_upd_rescfg = S_DEFAULT_OTA_UPDATE_RESET_CONFIG;
+        if (nvs_read_uint16(S_NAMESPACE, S_KEY_OTA_UPDATE_RESET_CONFIG, &ota_upd_rescfg) != ESP_OK) {
+            ESP_LOGW(OTA_TAG, "Failed to read OTA update reset config from NVS, using default: %i", ota_upd_rescfg);
+        } else {
+            ESP_LOGI(OTA_TAG, "OTA update reset config: %i", ota_upd_rescfg);
+        }
+        // 2 - perform reset based on mode
+        if (ota_upd_rescfg > 0) {
+            // reset device settings
+            if (reset_device_settings() != ESP_OK) {
+                ESP_LOGE(OTA_TAG, "Failed to reset device settings after OTA update");
+            } else {
+                ESP_LOGI(OTA_TAG, "Device settings reset successfully after OTA update");   
+            }           
+        }
+        // Reboot the device to apply the update
+        system_reboot();
+    } else {
+        ESP_LOGE(OTA_TAG, "OTA update failed with error code: %s", esp_err_to_name(ret));
+#if _DEVICE_ENABLE_STATUS_MEMGUARD
+        // Restore previous memory guard mode
+        ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_STATUS_MEMGUARD_MODE, current_memguard_mode));
+        ESP_LOGI(OTA_TAG, "Memory guard mode restored to %i", current_memguard_mode);
+#endif
+    }
+
+    free(update_param);  // Free the allocated memory for parameters
+    vTaskDelete(NULL);   // Delete the OTA update task
+}
+
+/* System control routines */
+/**
+ * @file settings.c
+ * @brief Helper function to clear all data in NVS (factory reset)
+ * 
+ * This file contains the implementation of a helper function that performs
+ * a factory reset by clearing all data stored in the Non-Volatile Storage (NVS).
+ * 
+ * @note This operation will erase all user settings and data stored in NVS.
+ */
+esp_err_t reset_factory_settings() {
+    esp_err_t ret = nvs_flash_erase();
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Factory reset: all data erased from NVS.");
+    } else {
+        ESP_LOGE(TAG, "Failed to erase NVS for factory reset: %s", esp_err_to_name(ret));
+    }
+    return ret;
+}
+
+/**
+ * @brief Helper function to clear all keys in the "settings" namespace.
+ *
+ * This function iterates through all keys stored in the "settings" namespace
+ * and removes them. It is useful for resetting the settings to their default
+ * state.
+ */
+esp_err_t reset_device_settings() {
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(S_NAMESPACE, NVS_READWRITE, &handle);
+    if (ret == ESP_OK) {
+        ret = nvs_erase_all(handle);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Device settings reset: all keys erased in the '%s' namespace.", S_NAMESPACE);
+        } else {
+            ESP_LOGE(TAG, "Failed to erase '%s' namespace: %s", esp_err_to_name(ret), S_NAMESPACE);
+        }
+        nvs_close(handle);
+    } else {
+        ESP_LOGE(TAG, "Failed to open '%s' namespace: %s", esp_err_to_name(ret), S_NAMESPACE);
+    }
+    return ret;
+}
+
+/**
+ * @brief Resets the Wi-Fi settings to their default values.
+ *
+ * This function resets the Wi-Fi settings stored in the non-volatile storage
+ * to their default values. It is typically used to clear any existing Wi-Fi
+ * configurations and start fresh.
+ *
+ * @return
+ *     - ESP_OK: Success
+ *     - ESP_FAIL: Failure
+ */
+esp_err_t reset_wifi_settings() {
+    esp_err_t ret;
+    nvs_handle_t wifi_handle;
+    ret = nvs_open(WIFI_NAMESPACE, NVS_READWRITE, &wifi_handle); // Assuming Wi-Fi settings are stored in WIFI_NAMESPACE namespace
+
+    if (ret == ESP_OK) {
+        ret = nvs_erase_all(wifi_handle);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "Wi-Fi settings reset: all keys erased in the '%s' namespace.", WIFI_NAMESPACE);
+        } else {
+            ESP_LOGE(TAG, "Failed to erase '%s' namespace: %s", esp_err_to_name(ret), WIFI_NAMESPACE);
+        }
+        nvs_close(wifi_handle);
+    } else {
+        ESP_LOGE(TAG, "Failed to open '%s' namespace: %s", esp_err_to_name(ret), WIFI_NAMESPACE);
+    }
+
+    return ret;
 }

@@ -21,6 +21,18 @@ set(MAJOR_VERSION "1.0")
 # Find Python interpreter
 find_package(Python3 REQUIRED)
 
+# --- Push firmware artifacts to S3 (ESP-IDF 5.5: implement as Ninja target) ---
+add_custom_target(
+    push-repo
+    COMMAND ${CMAKE_COMMAND} -E echo "Pushing firmware artifacts to S3..."
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/util/upload_build_to_s3.py
+            ${CMAKE_SOURCE_DIR}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Uploading build artifacts to S3"
+    VERBATIM
+)
+add_dependencies(push-repo app)
+
 # Add a custom target to run the make_version.py script
 add_custom_target(
     make_version ALL

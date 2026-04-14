@@ -144,6 +144,18 @@ void run_http_server(void *param) {
         err = httpd_register_uri_handler(server, &static_uri);
         ESP_LOGI(TAG, "Register %s => %s", static_uri.uri, esp_err_to_name(err));
         h_count++;
+
+        httpd_uri_t ota_update_uri = {
+            .uri      = "/ota-update",  // URL endpoint
+            .method   = HTTP_POST,       // HTTP method
+            .handler  = ota_post_handler, // Function to handle the request
+            .user_ctx = NULL            // User context, if needed
+        };
+
+        // Register the OTA update URI handler
+        err = httpd_register_uri_handler(server, &ota_update_uri);
+        ESP_LOGI(TAG, "Register %s => %s", ota_update_uri.uri, esp_err_to_name(err));
+        h_count++;
 #endif
 
 #if _DEVICE_ENABLE_HTTP_API
@@ -2249,6 +2261,120 @@ static esp_err_t get_ca_certificate_handler(httpd_req_t *req) {
     free(out);
     free(cert);
 
+    return ESP_OK;
+}
+
+/**
+ * @brief HTTP GET handler to trigger OTA update via web interface.
+ *
+ * This function is registered as an HTTP GET handler that triggers an OTA update
+ * using the URL stored in NVS. The OTA update process is started, and if successful,
+ * the device will send a response indicating the update has started and reboot afterward.
+ *
+ * @param req The HTTP request object.
+ * @return ESP_OK on successful request handling, or an error code otherwise.
+ */
+static esp_err_t ota_post_handler(httpd_req_t *req) {
+    char *ota_url = NULL;
+
+    // Extract form data
+    char buf[512];
+    memset(buf, 0, sizeof(buf));  // Initialize the buffer with zeros to avoid any garbage
+    int ret, remaining = req->content_len;
+    while (remaining > 0) {
+        if ((ret = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)))) <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                continue;
+            }
+            return ESP_FAIL;
+        }
+        remaining -= ret;
+    }
+
+    // dump received data for debugging
+    ESP_LOGI(OTA_TAG, "Received OTA update request with data: %s", buf);
+
+    char new_sw_version[64];
+    int param_size = extract_param_value(buf, "new_sw_version=", new_sw_version, sizeof(new_sw_version));
+    if (param_size <= 0) {
+        // If the parameter is missing or empty, log a warning and use a default value
+        strncpy(new_sw_version, "unknown", sizeof(new_sw_version));
+        ESP_LOGW(OTA_TAG, "Failed to extract new_sw_version from request");
+    } else {
+        // clean the extracted version string (e.g., URL decode if needed)
+        url_decode(new_sw_version);
+    }
+    
+    ESP_LOGI(OTA_TAG, "Received OTA update request for new version: %s", new_sw_version);
+
+    // Allocate memory dynamically for template and output
+    char *html_template = (char *)malloc(MAX_SMALL_TEMPLATE_SIZE);
+
+    if (html_template == NULL) {
+        ESP_LOGE(OTA_TAG, "%s: Memory allocation failed", __func__);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Read the template from SPIFFS (assuming you're loading it from SPIFFS)
+    FILE *f = fopen("/spiffs/firmware-updating.html", "r");
+    if (f == NULL) {
+        ESP_LOGE(OTA_TAG, "%s: Failed to open file for reading", __func__);
+        free(html_template);
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    // Load the template into html_template
+    size_t len = fread(html_template, 1, MAX_TEMPLATE_SIZE, f);
+    fclose(f);
+    html_template[len] = '\0';  // Null-terminate the string
+    
+    // Get the OTA URL from NVS
+    if (nvs_read_string(S_NAMESPACE, S_KEY_OTA_UPDATE_URL, &ota_url) != ESP_OK) {
+        ESP_LOGE(OTA_TAG, "Failed to read OTA URL from NVS");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    
+    ESP_LOGI(OTA_TAG, "Starting OTA via Web with URL: %s", ota_url);
+
+    // replace values
+    replace_placeholder(html_template, "{VAL_SW_FIRMWARE_URL}", ota_url);
+    replace_placeholder(html_template, "{VAL_SW_VERSION_NEW}", new_sw_version);
+        
+    // replace static fields
+    assign_static_page_variables(html_template);
+
+    // Allocate memory for the task parameter
+    ota_update_param_t *update_param = malloc(sizeof(ota_update_param_t));
+    if (update_param == NULL) {
+        ESP_LOGE(OTA_TAG, "%s: Memory allocation failed for OTA update parameters", __func__);
+        free(html_template);
+        free(ota_url);
+        httpd_resp_send_500(req);  // Send error response in case of memory allocation failure
+        return ESP_FAIL;
+    }
+
+    // Copy the OTA URL into the task parameter
+    strlcpy(update_param->ota_url, ota_url, sizeof(update_param->ota_url));
+
+    // Create the OTA update task, passing the OTA URL as the task parameter
+    if (xTaskCreate(ota_update_task, "ota_update_task", 8192, update_param, 5, NULL) != pdPASS) {
+        free(update_param);  // Free memory if task creation failed
+        free(ota_url);
+        free(html_template);
+        httpd_resp_send_500(req);  // Send error response if task creation fails
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, html_template, strlen(html_template));
+
+
+    // Free dynamically allocated memory if needed
+    free(ota_url);
+    free(html_template);
     return ESP_OK;
 }
 

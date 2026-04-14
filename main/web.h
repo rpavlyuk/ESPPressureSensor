@@ -30,6 +30,7 @@ static esp_err_t connect_zigbee_handler(httpd_req_t *req);
 static esp_err_t status_get_handler(httpd_req_t *req);
 static esp_err_t ca_cert_post_handler(httpd_req_t *req);
 static esp_err_t static_stream_handler(httpd_req_t *req);
+static esp_err_t ota_post_handler(httpd_req_t *req);
 
 // API Handlers
 static esp_err_t status_data_handler(httpd_req_t *req);
