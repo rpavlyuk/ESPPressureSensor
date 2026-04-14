@@ -34,7 +34,7 @@
         <div class="container">
             <table border="0">
                 <tr><td><b>Sensor Readings & Parameters</b></td><td></td></tr>
-                <tr><td>Pressure</td><td><span id="val_pressure"></span> Pa</td></tr>
+                <tr><td>Pressure</td><td><span id="val_pressure"></span> Pa (<span id="val_pressure_atm"></span> atm)</td></tr>
                 <tr><td>Voltage</td><td><span id="val_voltage"></span> V</td></tr>
                 <tr><td>Voltage Offset</td><td><span id="val_voltage_offset"></span> V</td></tr>
                 <tr><td>Sensor Linear Multiplier</td><td><span id="val_sensor_linear_multiplier"></span></td></tr>
@@ -98,6 +98,7 @@
             dataType: 'json',
             success: function(response) {
                 $('#val_pressure').text(response.sensor.pressure.toFixed(2));
+                $('#val_pressure_atm').text((response.sensor.pressure / 101325).toFixed(2));
                 $('#val_voltage').text(response.sensor.voltage.toFixed(3));
                 $('#val_voltage_offset').text(response.sensor.voltage_offset.toFixed(3));
                 $('#val_sensor_linear_multiplier').text(response.sensor.sensor_linear_multiplier);
