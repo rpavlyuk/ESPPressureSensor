@@ -9,6 +9,7 @@
 
 #include "ca_cert_manager.h"
 
+#include "version.h"
 #include "common.h"
 #include "settings.h"
 #include "flags.h"
@@ -87,7 +88,7 @@ void run_http_server(void *param) {
         httpd_uri_t submit_uri = {
             .uri       = "/submit",
             .method    = HTTP_POST,
-            .handler   = submit_post_handler,
+            .handler   = submit_config_handler,
             .user_ctx  = NULL
         };
         err = httpd_register_uri_handler(server, &submit_uri);
@@ -129,6 +130,19 @@ void run_http_server(void *param) {
         // Register the handler
         err = httpd_register_uri_handler(server, &ca_cert_uri);  
         ESP_LOGI(TAG, "Register %s => %s", ca_cert_uri.uri, esp_err_to_name(err));
+        h_count++;
+
+        /** STATIC Handlers **/
+        // Register the static file streaming handler
+        httpd_uri_t static_uri = {
+            .uri        = "/static/*",
+            .method     = HTTP_GET,
+            .handler    = static_stream_handler,
+            .user_ctx   = NULL
+        };
+
+        err = httpd_register_uri_handler(server, &static_uri);
+        ESP_LOGI(TAG, "Register %s => %s", static_uri.uri, esp_err_to_name(err));
         h_count++;
 #endif
 
@@ -178,6 +192,17 @@ void run_http_server(void *param) {
         err = httpd_register_uri_handler(server, &setting_get_one_uri);
         ESP_LOGI(TAG, "Register %s => %s", setting_get_one_uri.uri, esp_err_to_name(err));
         h_count++;
+
+        httpd_uri_t get_ca_cert_uri = {
+            .uri      = "/api/cert/get",
+            .method   = HTTP_GET,
+            .handler  = get_ca_certificate_handler,
+            .user_ctx = NULL
+        };
+
+        err = httpd_register_uri_handler(server, &get_ca_cert_uri);
+        ESP_LOGI(TAG, "Register %s => %s", get_ca_cert_uri.uri, esp_err_to_name(err));
+        h_count++;
 #endif
         ESP_LOGI(TAG, "%d HTTP handlers registered. Server ready!", h_count);
     } else {
@@ -190,7 +215,15 @@ void run_http_server(void *param) {
     }  
 }
 
-// Helper function to fill in the static variables in the template
+/**
+ * @brief: Helper function to fill in the static variables in the template
+ * 
+ * This function replaces the placeholders in the HTML template with the actual values.
+ * 
+ * @param[in,out] html_output: The HTML template to modify
+ * 
+ * @return void No return value
+ */
 void assign_static_page_variables(char *html_output) {
 
     // replace size fields
@@ -241,14 +274,30 @@ void assign_static_page_variables(char *html_output) {
     snprintf(f_len, sizeof(f_len), "%i", SENSOR_READ_INTERVAL_MIN);
     replace_placeholder(html_output, "{MIN_SENSOR_READ_INTERVAL}", f_len);
     snprintf(f_len, sizeof(f_len), "%i", SENSOR_READ_INTERVAL_MAX);
-    replace_placeholder(html_output, "{MAX_SENSOR_READ_INTERVAL}", f_len); 
+    replace_placeholder(html_output, "{MAX_SENSOR_READ_INTERVAL}", f_len);
+
+    replace_placeholder(html_output, "{VAL_SW_VERSION}", DEVICE_SW_VERSION);
+    replace_placeholder(html_output, "{VAL_SW_VERSION_NUM}", DEVICE_SW_VERSION_NUM);
+    replace_placeholder(html_output, "{VAL_SW_BUILD_NUM}", DEVICE_SW_BUILD_NUM);
+
+    snprintf(f_len, sizeof(f_len), "%i", CA_CERT_LENGTH);
+    replace_placeholder(html_output, "{VAL_CA_CERT_LEN_MAX}", f_len);
 }
 
-// Helper function to replace placeholders in the template
+/**
+ * @brief: Helper function to replace placeholders in the template with actual values
+ * 
+ * This function replaces the placeholders in the HTML template with the actual values.
+ * 
+ * @param[in,out] html_output: The HTML template to modify
+ * @param[in] placeholder: The placeholder to replace
+ * @param[in] value: The value to insert
+ * 
+ * @return void No return value
+ */ 
 void replace_placeholder(char *html_output, const char *placeholder, const char *value) {
     char *pos;
     while ((pos = strstr(html_output, placeholder)) != NULL) {
-        size_t len_before = pos - html_output;
         size_t len_placeholder = strlen(placeholder);
         size_t len_value = strlen(value);
         size_t len_after = strlen(pos + len_placeholder);
@@ -259,6 +308,102 @@ void replace_placeholder(char *html_output, const char *placeholder, const char 
         // Copy the replacement value into the position of the placeholder
         memcpy(pos, value, len_value);
     }
+}
+
+/**
+ * @brief Replace placeholders in a bounded (sized) buffer.
+ *
+ * Safer alternative to replace_placeholder(): prevents buffer overflow and
+ * avoids unbounded strlen() scans past the buffer capacity.
+ *
+ * Behavior:
+ * - Modifies @p buf in place.
+ * - Replaces ALL occurrences of @p placeholder with @p value.
+ * - If expansion would exceed @p cap (including final '\0'), returns ESP_ERR_NO_MEM.
+ *
+ * @param[in,out] buf         Buffer containing a NUL-terminated string.
+ * @param[in]     cap         Total buffer capacity in bytes (including space for '\0').
+ * @param[in]     placeholder Placeholder substring to replace (must be non-empty).
+ * @param[in]     value       Replacement string (NULL treated as "").
+ *
+ * @return
+ *   ESP_OK on success
+ *   ESP_ERR_INVALID_ARG on bad arguments or non-terminated input within cap
+ *   ESP_ERR_NO_MEM if output would exceed cap
+ */
+esp_err_t replace_placeholder_sized(char *buf, size_t cap,
+                                   const char *placeholder,
+                                   const char *value) {
+    if (!buf || cap == 0 || !placeholder) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!value) {
+        value = "";
+    }
+
+    const size_t ph_len = strlen(placeholder);
+    const size_t val_len = strlen(value);
+
+    if (ph_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Ensure buf is NUL-terminated within cap
+    size_t cur_len = strnlen(buf, cap);
+    if (cur_len >= cap) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Search from the beginning each time, but always bounded by cap via strnlen checks
+    char *pos = buf;
+
+    while (true) {
+        // strstr() is fine as long as buf is terminated within cap (checked above)
+        pos = strstr(pos, placeholder);
+        if (!pos) {
+            break;
+        }
+
+        // Re-evaluate current length (still bounded)
+        cur_len = strnlen(buf, cap);
+        if (cur_len >= cap) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        const size_t head_off = (size_t)(pos - buf);
+
+        // Sanity: placeholder must fully reside within the current string
+        if (head_off + ph_len > cur_len) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        // Tail length after the placeholder (bytes after it, not including '\0')
+        const size_t tail_len = cur_len - (head_off + ph_len);
+
+        // New length after replacement
+        const size_t new_len = cur_len - ph_len + val_len;
+
+        // Need space for '\0' too
+        if (new_len >= cap) {
+            return ESP_ERR_NO_MEM;
+        }
+
+        // Move tail (including '\0') to its new position
+        memmove(buf + head_off + val_len,
+                buf + head_off + ph_len,
+                tail_len + 1);
+
+        // Copy in replacement value
+        if (val_len > 0) {
+            memcpy(buf + head_off, value, val_len);
+        }
+
+        // Continue searching *after* the inserted value to avoid infinite loops
+        pos = buf + head_off + val_len;
+    }
+
+    return ESP_OK;
 }
 
 /**
@@ -580,43 +725,75 @@ static void json_value_to_string(const cJSON *v, char *out, size_t out_sz)
 
 
 /* WEB Handlers */
-
+/**
+* @brief HTTP GET handler for the configuration page.
+*
+* This function handles HTTP GET requests for the configuration page.
+* It reads the HTML template from SPIFFS, replaces placeholders with actual values
+* from NVS, and sends the resulting HTML content as the response.
+*
+* @param req Pointer to the HTTP request structure.
+* @return ESP_OK on success, ESP_FAIL on failure.
+*/
 static esp_err_t config_get_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Processing config web request");
     ESP_LOGI(TAG, "Processing config web request");
 
     // empty message
     const char* message = "";
 
-    // Allocate memory dynamically for template and output
-    char *html_template = (char *)malloc(MAX_TEMPLATE_SIZE);
-    char *html_output = (char *)malloc(MAX_TEMPLATE_SIZE);
+    // Prefer one big allocation to reduce fragmentation
+    const size_t buf_size = MAX_LARGE_TEMPLATE_SIZE + 1;
+    // const size_t total = buf_size * 2;
+    const size_t total = buf_size;
 
-    if (html_template == NULL || html_output == NULL) {
-        ESP_LOGE(TAG, "Memory allocation failed");
-        if (html_template) free(html_template);
-        if (html_output) free(html_output);
-        httpd_resp_send_500(req);
+    char *mem = (char *)malloc(total);
+
+    if (!mem) {
+        ESP_LOGE(TAG, "OOM: config handler needs %u bytes (free=%u, min_free=%u)",
+                 (unsigned)total,
+                 (unsigned)esp_get_free_heap_size(),
+                 (unsigned)esp_get_minimum_free_heap_size());
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "ESP device is out of free memory");
         return ESP_FAIL;
     }
+
+    // Assign pointers within the allocated block
+    char *html_output    = mem;
+
+    // html_template[0] = '\0';
+    html_output[0] = '\0';
 
     // Read the template from SPIFFS (assuming you're loading it from SPIFFS)
     FILE *f = fopen("/spiffs/config.html", "r");
     if (f == NULL) {
         ESP_LOGE(TAG, "Failed to open file for reading");
-        free(html_template);
-        free(html_output);
+        free(mem);
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }
 
-    // Load the template into html_template
-    size_t len = fread(html_template, 1, MAX_TEMPLATE_SIZE, f);
+    // Load the template into html_output
+    size_t len = fread(html_output, 1, buf_size - 1, f);
+    if (len == buf_size - 1 && !feof(f)) {
+        ESP_LOGE(TAG, "config.html too large (>%u bytes)", (unsigned)(buf_size - 1));
+        fclose(f);
+        free(mem);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     fclose(f);
-    html_template[len] = '\0';  // Null-terminate the string
+    html_output[len] = '\0'; // Null-terminate the string
 
-    // Copy template into html_output for modification
-    strcpy(html_output, html_template);
+    char *device_id = NULL;
+    char *device_serial = NULL;
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial));
+    replace_placeholder(html_output, "{VAL_DEVICE_ID}", device_id);
+    replace_placeholder(html_output, "{VAL_DEVICE_SERIAL}", device_serial);
 
+#if ENABLE_CONFIG_PLACEHOLDER_REPLACEMENT
     // Allocate memory for the strings you will retrieve from NVS
     char *mqtt_server = NULL;
     char *mqtt_protocol = NULL;
@@ -624,9 +801,6 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     char *mqtt_password = NULL;
     char *mqtt_prefix = NULL;
     char *ha_prefix = NULL;
-    char *device_id = NULL;
-    char *device_serial = NULL;
-    char *ca_cert = NULL;
 
     uint16_t mqtt_connect;
     uint16_t mqtt_port;
@@ -658,14 +832,6 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
-
-    // Load the CA certificate
-    if (load_ca_certificate(&ca_cert, CA_CERT_PATH_MQTTS) != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to load CA certificate from %s", CA_CERT_PATH_MQTTS);
-        return ESP_FAIL;
-    } else {
-        ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH_MQTTS);
-    }
 
     // Replace placeholders in the template with actual values
     char mqtt_port_str[6];
@@ -706,7 +872,7 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
     replace_placeholder(html_output, "{VAL_MQTT_CONNECT}", mqtt_connect_str);
     replace_placeholder(html_output, "{VAL_CA_CERT}", ca_cert);
-
+#endif
     // replace static fields
     assign_static_page_variables(html_output);
 
@@ -716,22 +882,33 @@ static esp_err_t config_get_handler(httpd_req_t *req) {
     httpd_resp_send(req, html_output, strlen(html_output));
 
     // Free dynamically allocated memory
-    free(html_template);
-    free(html_output);
+    free(mem);
+#if ENABLE_CONFIG_PLACEHOLDER_REPLACEMENT
     free(mqtt_server);
     free(mqtt_protocol);
     free(mqtt_user);
     free(mqtt_password);
     free(mqtt_prefix);
     free(ha_prefix);
+#endif
     free(device_id);
     free(device_serial);
-    free(ca_cert);
+
 
     return ESP_OK;
 }
 
-static esp_err_t submit_post_handler(httpd_req_t *req) {
+/**
+ * @brief: Handler for the POST request to submit the configuration form
+ * 
+ * This function handles the POST request to submit the configuration form.
+ * It extracts the form data, saves the parameters to NVS, and sends a response back to the client.
+ * 
+ * @param[in] req: The HTTP request object
+ * 
+ * @return ESP_OK on success, or an error code on failure
+ */
+static esp_err_t submit_config_handler(httpd_req_t *req) {
     // Extract form data
     char buf[1024];
     memset(buf, 0, sizeof(buf));  // Initialize the buffer with zeros to avoid any garbage
@@ -753,35 +930,48 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     // empty message
     const char* success_message = "<div class=\"alert alert-primary alert-dismissible fade show\" role=\"alert\"> Parameters saved successfully. A device reboot might be required for the setting to come into effect.<button type=\"button\" class=\"btn-close\" data-bs-dismiss=\"alert\" aria-label=\"Close\"></button></div>";
     
-    // Allocate memory dynamically for template and output
-    char *html_template = (char *)malloc(MAX_TEMPLATE_SIZE);
-    char *html_output = (char *)malloc(MAX_TEMPLATE_SIZE);
+    // Prefer one big allocation to reduce fragmentation
+    const size_t buf_size = MAX_LARGE_TEMPLATE_SIZE + 1;
+    const size_t total = buf_size;
 
-    if (html_template == NULL || html_output == NULL) {
-        ESP_LOGE(TAG, "Memory allocation failed");
-        if (html_template) free(html_template);
-        if (html_output) free(html_output);
-        httpd_resp_send_500(req);
+    char *mem = (char *)malloc(total);
+
+    if (!mem) {
+        ESP_LOGE(TAG, "OOM: config handler needs %u bytes (free=%u, min_free=%u)",
+                 (unsigned)total,
+                 (unsigned)esp_get_free_heap_size(),
+                 (unsigned)esp_get_minimum_free_heap_size());
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "ESP device is out of free memory");
         return ESP_FAIL;
     }
+
+    // Assign pointers within the allocated block
+    char *html_output      = mem;
+
+    // NULL-terminate the output buffer
+    html_output[0] = '\0';
 
     // Read the template from SPIFFS (assuming you're loading it from SPIFFS)
     FILE *f = fopen("/spiffs/config.html", "r");
     if (f == NULL) {
         ESP_LOGE(TAG, "Failed to open file for reading");
-        free(html_template);
-        free(html_output);
+        free(mem);
         httpd_resp_send_404(req);
         return ESP_FAIL;
     }
 
-    // Load the template into html_template
-    size_t len = fread(html_template, 1, MAX_TEMPLATE_SIZE, f);
+    // Load the template into html_output
+    size_t len = fread(html_output, 1, MAX_TEMPLATE_SIZE, f);
     fclose(f);
-    html_template[len] = '\0';  // Null-terminate the string
-
-    // Copy template into html_output for modification
-    strcpy(html_output, html_template);
+    if (len == buf_size - 1 && !feof(f)) {
+        ESP_LOGE(TAG, "config.html too large (>%u bytes)", (unsigned)(buf_size - 1));
+        free(mem);
+        mem = NULL;
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    html_output[len] = '\0'; // Null-terminate the string
 
     // Allocate memory for the strings you will retrieve from NVS
     // We need to pre-allocate memory as we are loading those values from POST request
@@ -791,7 +981,8 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     char *mqtt_password = (char *)malloc(MQTT_PASSWORD_LENGTH);
     char *mqtt_prefix = (char *)malloc(MQTT_PREFIX_LENGTH);
     char *ha_prefix = (char *)malloc(HA_PREFIX_LENGTH);
-    char *ca_cert = NULL;
+    char *ota_update_url = (char *)malloc(OTA_UPDATE_URL_LENGTH);
+    char *net_log_host = (char *)malloc(NET_LOGGING_HOST_LENGTH);
 
     char mqtt_port_str[6], sensor_offset_str[10], sensor_linear_multiplier_str[10];
     char ha_upd_intervl_str[10];
@@ -800,6 +991,10 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     char sensor_deviate_str[10];
     char sensor_intervl_str[10];
     char mqtt_connect_str[10];
+    char net_log_type_str[6];
+    char net_log_port_str[6];
+    char net_log_stdout_str[6];
+    char ota_upd_rescfg_str[6];
 
     // Extract parameters from the buffer
     extract_param_value(buf, "mqtt_server=", mqtt_server, MQTT_SERVER_LENGTH);
@@ -817,7 +1012,12 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     extract_param_value(buf, "sensor_deviate=", sensor_deviate_str, sizeof(sensor_deviate_str));
     extract_param_value(buf, "sensor_intervl=", sensor_intervl_str, sizeof(sensor_intervl_str));
     extract_param_value(buf, "mqtt_connect=", mqtt_connect_str, sizeof(mqtt_connect_str));
-
+    extract_param_value(buf, "ota_update_url=", ota_update_url, OTA_UPDATE_URL_LENGTH);
+    extract_param_value(buf, "net_log_host=", net_log_host, NET_LOGGING_HOST_LENGTH);
+    extract_param_value(buf, "net_log_type=", net_log_type_str, sizeof(net_log_type_str));
+    extract_param_value(buf, "net_log_port=", net_log_port_str, sizeof(net_log_port_str));
+    extract_param_value(buf, "net_log_stdout=", net_log_stdout_str, sizeof(net_log_stdout_str));
+    extract_param_value(buf, "ota_upd_rescfg=", ota_upd_rescfg_str, sizeof(ota_upd_rescfg_str));
 
     // Convert mqtt_port and sensor_offset to their respective types
     uint16_t mqtt_port = (uint16_t)atoi(mqtt_port_str);  // Convert to uint16_t
@@ -829,6 +1029,10 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     uint16_t sensor_deviate = (uint16_t)atoi(sensor_deviate_str);
     uint16_t sensor_intervl = (uint16_t)atoi(sensor_intervl_str);
     uint16_t mqtt_connect = (uint16_t)atoi(mqtt_connect_str);
+    uint16_t net_log_port = (uint16_t)atoi(net_log_port_str);
+    uint16_t net_log_stdout = (uint16_t)atoi(net_log_stdout_str);
+    uint16_t net_log_type = (uint16_t)atoi(net_log_type_str);
+    uint16_t ota_upd_rescfg = (uint16_t)atoi(ota_upd_rescfg_str);
 
     // Decode potentially URL-encoded parameters
     url_decode(mqtt_server);
@@ -837,6 +1041,8 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     url_decode(mqtt_password);
     url_decode(mqtt_prefix);
     url_decode(ha_prefix);
+    url_decode(ota_update_url);
+    url_decode(net_log_host);
 
     // dump parameters for debugging pursposes
     ESP_LOGI(TAG, "Received setting parameters");
@@ -855,6 +1061,12 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "sensor_deviate: %i", sensor_deviate);
     ESP_LOGI(TAG, "sensor_intervl: %i", sensor_intervl);
     ESP_LOGI(TAG, "mqtt_connect: %i", mqtt_connect);
+    ESP_LOGI(TAG, "net_log_type: %s", net_log_type_str);
+    ESP_LOGI(TAG, "net_log_host: %s", net_log_host);
+    ESP_LOGI(TAG, "net_log_port: %s", net_log_port_str);
+    ESP_LOGI(TAG, "net_log_stdout: %s", net_log_stdout_str);
+    ESP_LOGI(TAG, "ota_update_url: %s", ota_update_url);
+    ESP_LOGI(TAG, "ota_upd_rescfg: %s", ota_upd_rescfg_str);
 
     // Save parsed values to NVS or apply them directly
     ESP_ERROR_CHECK(nvs_write_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, sensor_offset));
@@ -872,8 +1084,14 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, sensor_deviate));
     ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, sensor_intervl));
     ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, mqtt_connect));
+    ESP_ERROR_CHECK(nvs_write_string(S_NAMESPACE, S_KEY_NET_LOGGING_HOST, net_log_host));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_TYPE, net_log_type));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_PORT, net_log_port));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_KEEP_STDOUT, net_log_stdout));
+    ESP_ERROR_CHECK(nvs_write_string(S_NAMESPACE, S_KEY_OTA_UPDATE_URL, ota_update_url));
+    ESP_ERROR_CHECK(nvs_write_uint16(S_NAMESPACE, S_KEY_OTA_UPDATE_RESET_CONFIG, ota_upd_rescfg));
 
-    /** Load and display settings */
+  
 
     // Free pointers to previosly used strings
     free(mqtt_server);
@@ -882,7 +1100,11 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     free(mqtt_password);
     free(mqtt_prefix);
     free(ha_prefix);
+    free(ota_update_url);
+    free(net_log_host);
 
+#if ENABLE_CONFIG_PLACEHOLDER_REPLACEMENT
+    /** Load and display settings */
     // declaring NULL pointers for neccessary variables
     char *device_id = NULL;
     char *device_serial = NULL;
@@ -894,10 +1116,13 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     mqtt_password = NULL;
     mqtt_prefix = NULL;
     ha_prefix = NULL;
+    ota_update_url = NULL;
+    net_log_host = NULL;
 
     // Load settings from NVS (use default values if not set)
     ESP_ERROR_CHECK(nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_data.voltage_offset));
     ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, &sensor_data.sensor_linear_multiplier));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_SERVER, &mqtt_server));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_PORT, &mqtt_port));
     ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PROTOCOL, &mqtt_protocol));
@@ -912,15 +1137,13 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connect));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_NET_LOGGING_HOST, &net_log_host));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_TYPE, &net_log_type));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_PORT, &net_log_port));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_KEEP_STDOUT, &net_log_stdout));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_OTA_UPDATE_URL, &ota_update_url));
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_OTA_UPDATE_RESET_CONFIG, &ota_upd_rescfg));
 
-    // Load the CA certificate
-    if (load_ca_certificate(&ca_cert, CA_CERT_PATH_MQTTS) != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to load CA certificate from %s", CA_CERT_PATH_MQTTS);
-        return ESP_FAIL;
-    } else {
-        ESP_LOGI(TAG, "Loaded CA certificate: %s", CA_CERT_PATH_MQTTS);
-    }
 
     // Replace placeholders in the template with actual values
     snprintf(mqtt_port_str, sizeof(mqtt_port_str), "%u", mqtt_port);
@@ -932,11 +1155,17 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     snprintf(sensor_deviate_str, sizeof(sensor_deviate_str), "%i", (uint16_t) sensor_deviate);
     snprintf(sensor_intervl_str, sizeof(sensor_intervl_str), "%i", (uint16_t) sensor_intervl);
     snprintf(mqtt_connect_str, sizeof(mqtt_connect_str), "%i", (uint16_t) mqtt_connect);
+    sprintf(net_log_port_str, sizeof(net_log_port_str), "%i", net_log_port);
+    sprintf(net_log_type_str, sizeof(net_log_type_str), "%i", net_log_type);
+    sprintf(net_log_stdout_str, sizeof(net_log_stdout_str), "%i", net_log_stdout);
+    sprintf(ota_upd_rescfg_str, sizeof(ota_upd_rescfg_str), "%i", ota_upd_rescfg);
 
     // ESP_LOGI(TAG, "Current HTML output size: %i, MAX_TEMPLATE_SIZE: %i", sizeof(html_output), MAX_TEMPLATE_SIZE);
 
+    replace_placeholder(html_output, "{VAL_MESSAGE}", success_message);
     replace_placeholder(html_output, "{VAL_DEVICE_ID}", device_id);
     replace_placeholder(html_output, "{VAL_DEVICE_SERIAL}", device_serial);
+    replace_placeholder(html_output, "{VAL_MQTT_CONNECT}", mqtt_connect_str);
     replace_placeholder(html_output, "{VAL_MQTT_SERVER}", mqtt_server);
     replace_placeholder(html_output, "{VAL_MQTT_PORT}", mqtt_port_str);
     replace_placeholder(html_output, "{VAL_MQTT_PROTOCOL}", mqtt_protocol);
@@ -946,15 +1175,18 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     replace_placeholder(html_output, "{VAL_HA_PREFIX}", ha_prefix);
     replace_placeholder(html_output, "{VAL_SENSOR_OFFSET}", sensor_offset_str);
     replace_placeholder(html_output, "{VAL_SENSOR_LINEAR_MULTIPLIER}", sensor_linear_multiplier_str);
-    replace_placeholder(html_output, "{VAL_MESSAGE}", success_message);
     replace_placeholder(html_output, "{VAL_HA_UPDATE_INTERVAL}", ha_upd_intervl_str);
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_COUNT}", sensor_samples_str);
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_INTERVAL}", sensor_smp_int_str);
     replace_placeholder(html_output, "{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}", sensor_deviate_str);
     replace_placeholder(html_output, "{VAL_SENSOR_READ_INTERVAL}", sensor_intervl_str);
-    replace_placeholder(html_output, "{VAL_MQTT_CONNECT}", mqtt_connect_str);
-    replace_placeholder(html_output, "{VAL_CA_CERT}", ca_cert);
-
+    replace_placeholder(html_output, "{VAL_NET_LOGGING_HOST}", net_log_host);
+    replace_placeholder(html_output, "{VAL_NET_LOGGING_TYPE}", net_log_type_str);
+    replace_placeholder(html_output, "{VAL_NET_LOGGING_PORT}", net_log_port_str);
+    replace_placeholder(html_output, "{VAL_NET_LOGGING_STDOUT}", net_log_stdout_str);
+    replace_placeholder(html_output, "{VAL_OTA_UPDATE_URL}", ota_update_url);
+    replace_placeholder(html_output, "{VAL_OTA_UPDATE_RESET_CONFIG}", ota_upd_rescfg_str);
+#endif
     // replace static fields
     assign_static_page_variables(html_output);
 
@@ -964,19 +1196,23 @@ static esp_err_t submit_post_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_send(req, html_output, strlen(html_output));
 
-    // Free dynamically allocated memory
-    free(html_template);
-    free(html_output);
+
+#if ENABLE_CONFIG_PLACEHOLDER_REPLACEMENT
     free(mqtt_server);
     free(mqtt_protocol);
     free(mqtt_user);
     free(mqtt_password);
     free(mqtt_prefix);
     free(ha_prefix);
+    free(ota_update_url);
+    free(net_log_host);
+
     free(device_id);
     free(device_serial);
-    free(ca_cert);
+#endif
 
+    // Free dynamically allocated memory
+    free(mem);
     return ESP_OK;
 }
 
@@ -1010,7 +1246,16 @@ static esp_err_t reboot_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-// Handle Zigbee connection request
+#if _DEVICE_ENABLE_ZIGBEE
+/**
+ * @brief Handler for initiating Zigbee connection/pairing.
+ * This handler responds to a Zigbee connection request by sending an HTML response that informs the user about the initiation of the MQTT connection/pairing process. It also includes a redirect to the home page after a specified time interval.
+ * Note: The actual Zigbee initialization logic should be implemented in the zigbee_init_sensor() function, which is currently commented out. You can replace the placeholder with the actual implementation to establish the Zigbee connection.
+ * 
+ * @param req Pointer to the HTTP request structure.
+ * @return ESP_OK if the response is sent successfully, otherwise an appropriate error code.
+ * 
+ */
 static esp_err_t connect_zigbee_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Received Zigbee connection request");
 
@@ -1042,6 +1287,7 @@ static esp_err_t connect_zigbee_handler(httpd_req_t *req) {
 
     return ESP_OK;
 }
+#endif
 
 /**
  * @brief: Status web-service
@@ -1134,43 +1380,98 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+/**
+ * @brief: Handler for the POST request to update the relay state
+ * 
+ * This function handles the POST request to update the relay state.
+ * It extracts the relay ID and state from the request, updates the relay state, and sends a response back to the client.
+ * 
+ * @param[in] req: The HTTP request object
+ * 
+ * @return ESP_OK on success, or an error code on failure
+ */
 static esp_err_t ca_cert_post_handler(httpd_req_t *req) {
+
+    ESP_LOGI(TAG, "Processing certificate saving web request");
+
     // Buffer to hold the received certificate
-    char buf[512];
+    char buf[1024];
     memset(buf, 0, sizeof(buf));  // Initialize the buffer with zeros to avoid any garbage
     int total_len = req->content_len;
+    ESP_LOGI(TAG, "Total POST content length: %d", total_len);
+    if (total_len == 0) {
+        ESP_LOGE(TAG, "POST content length is 0. Cannot proceed.");
+        return ESP_FAIL;
+    }
     int received = 0;
 
-    // Send HTML response with a redirect after 30 seconds
-    const char *success_html = "<html>"
-                                "<head>"
-                                    "<title>Redirecting...</title>"
-                                    "<meta http-equiv=\"refresh\" content=\"5;url=/\" />"
-                                    "<script>"
-                                        "setTimeout(function() { window.location.href = '/'; }, 5000);"
-                                    "</script>"
-                                "</head>"
-                                "<body>"
-                                    "<h2>Certficate has been saved successfully!</h2>"
-                                    "<p>Please wait, you will be redirected to the <a href=\"/\">home page</a> in 5 seconds.</p>"
-                                "</body>"
-                              "</html>";
+    // Prefer one big allocation to reduce fragmentation
+    const size_t buf_size = MAX_SMALL_TEMPLATE_SIZE;
+    const size_t total = buf_size * 2;
+
+    char *mem = (char *)malloc(total);
+
+    if (!mem) {
+        ESP_LOGE(TAG, "OOM: config handler needs %u bytes (free=%u, min_free=%u)",
+                 (unsigned)total,
+                 (unsigned)esp_get_free_heap_size(),
+                 (unsigned)esp_get_minimum_free_heap_size());
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "ESP device is out of free memory");
+        return ESP_FAIL;
+    }
+
+    // Split memory into 2 regions
+    char *html_template    = mem;
+    char *html_output      = mem + buf_size;
+
+    html_template[0] = '\0';
+    html_output[0] = '\0';
+
+    // Read the template from SPIFFS (assuming you're loading it from SPIFFS)
+    FILE *f = fopen("/spiffs/ca-cert-saving.html", "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for reading");
+        free(mem);
+        mem = NULL;
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    // Load the template into html_template
+    size_t len = fread(html_template, 1, MAX_SMALL_TEMPLATE_SIZE, f);
+    fclose(f);
+    html_template[len] = '\0';  // Null-terminate the string
+
+    // Copy template into html_output for modification
+    strcpy(html_output, html_template);
 
 
     // Allocate memory for the certificate outside the stack
     char *content = (char *)malloc(total_len + 1);
     if (content == NULL) {
         ESP_LOGE(TAG, "Failed to allocate memory for CA certificate");
+        free(mem);
+        mem = NULL;
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory allocation failed");
         return ESP_ERR_NO_MEM;
     }
+    // Fill content with zeros to avoid garbage
+    memset(content, 0, total_len + 1);
 
     // Read the certificate data from the request in chunks
     while (received < total_len) {
         int ret = httpd_req_recv(req, buf, MIN(total_len - received, sizeof(buf)));
         if (ret <= 0) {
-            ESP_LOGE(TAG, "Failed to receive POST data");
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                ESP_LOGE(TAG, "Timeout while receiving POST data");
+            } else {
+                ESP_LOGE(TAG, "Error while receiving POST data: error %s, code %d", esp_err_to_name(ret), ret);
+            }
             free(content); // Free the allocated memory in case of failure
+            free(mem);
+            mem = NULL;
+            content = NULL;
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive data");
             return ESP_FAIL;
         }
@@ -1180,14 +1481,35 @@ static esp_err_t ca_cert_post_handler(httpd_req_t *req) {
 
     ESP_LOGI(TAG, "POST Content:\n%s", content);
 
+    // Extract certificate type from the request: mqtts or https
+    char ca_type[MAX_CA_CERT_SIZE];
+    int ca_type_length = extract_param_value(content, "cert_type=", ca_type, MAX_CA_CERT_SIZE);
+    if (ca_type_length <= 0) {
+        ESP_LOGE(TAG, "Failed to extract CA certificate type from the received data");
+        free(content);
+        free(mem);
+        mem = NULL;
+        content = NULL;
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to extract certificate type");
+        return ESP_FAIL;
+    }
+
+    // determine certificate key based on the type
+    const char *ca_key = (strcmp(ca_type, "mqtts") == 0) ? "ca_cert_mqtts=" : "ca_cert_https=";
+    ESP_LOGI(TAG, "Will use key (%s) to extract the certificate according to its type (%s)", ca_key, ca_type);
+
     // extract ca_cert from the output
     char *ca_cert = (char *)malloc(MAX_CA_CERT_SIZE);
     // Extract the certificate
-    int cert_length = extract_param_value(content, "ca_cert=", ca_cert, MAX_CA_CERT_SIZE);
+    int cert_length = extract_param_value(content, ca_key, ca_cert, MAX_CA_CERT_SIZE);
     if (cert_length <= 0) {
         ESP_LOGE(TAG, "Failed to extract CA certificate from the received data");
         free(content);
         free(ca_cert);
+        free(mem);
+        mem = NULL;
+        content = NULL;
+        ca_cert = NULL;
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to extract certificate");
         return ESP_FAIL;
     }
@@ -1199,20 +1521,35 @@ static esp_err_t ca_cert_post_handler(httpd_req_t *req) {
     str_trunc_after(ca_cert, "-----END CERTIFICATE-----");
 
     // Save the certificate
-    esp_err_t err = save_ca_certificate(ca_cert, CA_CERT_PATH_MQTTS, true);
+    const char *ca_path = (strcmp(ca_type, "mqtts") == 0) ? CA_CERT_PATH_MQTTS : CA_CERT_PATH_HTTPS;
+    ESP_LOGI(TAG, "Saving certificate to %s", ca_path);
+    replace_placeholder(html_output, "{VAL_CA_PATH}", ca_path);
+
+    esp_err_t err = save_ca_certificate(ca_cert, ca_path, true);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save CA certificate");
         free(content);
         free(ca_cert);
+        free(mem);
+        mem = NULL;
+        content = NULL;
+        ca_cert = NULL;
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save certificate");
         return ESP_FAIL;
     }
 
     free(content);
     free(ca_cert); // Free the allocated memory after saving
+
     // Send a response indicating success
-    httpd_resp_sendstr(req, success_html);
-    ESP_LOGI(TAG, "CA certificate saved successfully");
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_sendstr(req, html_output);
+    ESP_LOGI(TAG, "CA certificate saving request processed successfully");
+
+    free(mem);
+    mem = NULL;
+    content = NULL;
+    ca_cert = NULL;
 
     return ESP_OK;
 }
@@ -1560,7 +1897,362 @@ static esp_err_t get_setting_one_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/** Server routines */
+/**
+ * @brief HTTP handler to stream /static/<name> as /spiffs/static-<name> (SPIFFS has no dirs)
+ * This handler streams static files from SPIFFS with on-the-fly placeholder replacement.
+ *
+ * Example:
+ *   GET /static/script.js  ->  /spiffs/static-script.js
+ *
+ * Notes:
+ * - Uses line-by-line streaming with placeholder replacement.
+ * - For placeholders that might span lines, you'll need a real streaming placeholder engine.
+ * - Adjust STREAM_READ_LINE_SZ and STREAM_LINE_BUF_SZ as needed.
+ * 
+ * @param req HTTP request
+ * @return ESP_OK or ESP_FAIL
+ */
+static esp_err_t static_stream_handler(httpd_req_t *req) {
+    // Basic URI validation
+    const char *uri = req->uri;                 // e.g. "/static/script.js"
+    const char *prefix = "/static/";
+    const size_t prefix_len = strlen(prefix);
+
+    ESP_LOGI(TAG, "Static file request: %s", uri);
+
+    if (strncmp(uri, prefix, prefix_len) != 0 || uri[prefix_len] == '\0') {
+        ESP_LOGW(TAG, "Invalid static file request: %s", uri);
+        httpd_resp_send_404(req);
+        return ESP_OK;
+    }
+
+    // Disallow parent traversal and weird paths
+    // (we don't support subdirs anyway; map "a/b.js" -> "a-b.js")
+    char mapped_name[128] = {0};
+    {
+        const char *name = uri + prefix_len;    // "script.js" or "dir/file.js"
+        size_t j = 0;
+
+        for (size_t i = 0; name[i] != '\0' && j < sizeof(mapped_name) - 1; i++) {
+            char c = name[i];
+
+            // Reject obvious traversal
+            if (c == '.' && name[i + 1] == '.') {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid path");
+                return ESP_OK;
+            }
+
+            // SPIFFS mapping: replace '/' with '-' (SPIFFS has no dirs)
+            if (c == '/') c = '-';
+
+            // Keep it conservative: allow alnum and a few safe symbols
+            if (!(isalnum((unsigned char)c) || c=='-' || c=='_' || c=='.')) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid characters in path");
+                return ESP_OK;
+            }
+
+            mapped_name[j++] = c;
+        }
+
+        mapped_name[j] = '\0';
+
+        if (mapped_name[0] == '\0') {
+            httpd_resp_send_404(req);
+            return ESP_OK;
+        }
+    }
+
+    // Build actual SPIFFS path: /spiffs/static-<mapped_name>
+    char filepath[192];
+    snprintf(filepath, sizeof(filepath), "%s%s", STATIC_PATH_PREFIX, mapped_name);
+
+    FILE *f = fopen(filepath, "r");
+    if (!f) {
+        ESP_LOGW(TAG, "File not found: %s (uri=%s)", filepath, uri);
+        httpd_resp_send_404(req);
+        return ESP_OK;
+    }
+
+    // Set content type based on requested URI extension (not SPIFFS name)
+    httpd_resp_set_type(req, content_type_from_ext(uri));
+#if ENABLE_STATIC_NOCACHE_HEADER
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+#else
+    httpd_resp_set_hdr(req, "Cache-Control", "max-age=3600"); // optional
+#endif
+
+    // Buffers
+    char *read_line = (char *)malloc(STREAM_READ_LINE_SZ);
+    char *work_line = (char *)malloc(STREAM_LINE_BUF_SZ);
+    if (!read_line || !work_line) {
+        fclose(f);
+        free(read_line);
+        free(work_line);
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
+
+#if ENABLE_PLACEHOLDER_REPLACEMENT
+    // NOTE: If you want these per-request, extract them from query params.
+    // For now, keep placeholders consistent with the rest of your templating model.
+    char *device_id = NULL;
+    char *device_serial = NULL;
+
+    esp_err_t err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id);
+    if (err != ESP_OK || !device_id) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read device_id from NVS");
+        return ESP_FAIL;
+    }
+
+    err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial);
+    if (err != ESP_OK || !device_serial) {
+        free(device_id);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read device_serial from NVS");
+        return ESP_FAIL;
+    }
+ #endif
+
+    while (fgets(read_line, STREAM_READ_LINE_SZ, f) != NULL) {
+        // If the line is longer than STREAM_READ_LINE_SZ-1, fgets returns a partial line
+        // (no '\n' and not EOF). This approach cannot safely template such lines.
+        size_t rl = strlen(read_line);
+        if (rl == STREAM_READ_LINE_SZ - 1 && read_line[rl - 1] != '\n' && !feof(f)) {
+            ESP_LOGE(TAG,
+                     "Line too long in %s; increase STREAM_READ_LINE_SZ/STREAM_LINE_BUF_SZ "
+                     "or avoid templating large/minified assets",
+                     filepath);
+            fclose(f);
+            free(read_line);
+            free(work_line);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template line too long");
+            return ESP_OK;
+        }
+
+        // Copy into a larger working buffer to give replacements room to expand
+        strlcpy(work_line, read_line, STREAM_LINE_BUF_SZ);
+
+#if ENABLE_PLACEHOLDER_REPLACEMENT
+        // Replace placeholders safely (bounded)
+        esp_err_t r;
+
+        r = replace_placeholder_sized(work_line, STREAM_LINE_BUF_SZ,
+                                      "{VAL_DEVICE_ID}", device_id);
+        if (r != ESP_OK) {
+            ESP_LOGE(TAG, "Template expansion overflow in %s (device_id): %s",
+                     filepath, esp_err_to_name(r));
+            fclose(f);
+            free(read_line);
+            free(work_line);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template expansion overflow");
+            return ESP_OK;
+        }
+
+        r = replace_placeholder_sized(work_line, STREAM_LINE_BUF_SZ,
+                                      "{VAL_DEVICE_SERIAL}", device_serial);
+        if (r != ESP_OK) {
+            ESP_LOGE(TAG, "Template expansion overflow in %s (device_serial): %s",
+                     filepath, esp_err_to_name(r));
+            fclose(f);
+            free(read_line);
+            free(work_line);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template expansion overflow");
+            return ESP_OK;
+        }
+#endif
+        // Stream it out
+        esp_err_t err = httpd_resp_send_chunk(req, work_line, HTTPD_RESP_USE_STRLEN);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "send_chunk failed (err=0x%x)", (unsigned)err);
+            break;
+        }
+
+        // Optional: yield a tick if you ever template larger pages to avoid WDT starvation
+        // vTaskDelay(1);
+    }
+
+    fclose(f);
+    free(read_line);
+    free(work_line);
+
+#if ENABLE_PLACEHOLDER_REPLACEMENT
+    free(device_id);
+    free(device_serial);
+#endif
+
+    // End chunked response
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+/**
+ * @brief Handler for /api/cert/get endpoint
+ *
+ * @param req HTTP request
+ * @return ESP_OK or ESP_FAIL
+ */
+static esp_err_t get_ca_certificate_handler(httpd_req_t *req) {
+
+    // Prepare JSON response root early (so every path returns consistent JSON)
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        // If even cJSON can't allocate, fall back to plain text 500
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_sendstr(req, "OOM: failed to allocate JSON object");
+        return ESP_FAIL;
+    }
+
+    // Defaults
+    cJSON_AddStringToObject(root, "cert", "");
+    cJSON_AddStringToObject(root, "type", "");
+    cJSON_AddNumberToObject(root, "size", 0);
+    cJSON_AddNumberToObject(root, "status", 0);
+    cJSON_AddStringToObject(root, "msg", "");
+
+    esp_err_t err = ESP_OK;
+
+    // 1) Validate device identity (expects device_id & device_serial in query)
+    err = validate_device_identity_from_get_query(req);
+    if (err != ESP_OK) {
+        cJSON_ReplaceItemInObject(root, "status", cJSON_CreateNumber((double)err));
+        cJSON_ReplaceItemInObject(root, "msg", cJSON_CreateString("Device identity validation failed"));
+
+        char *out = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+
+        if (!out) {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_set_type(req, "text/plain");
+            httpd_resp_sendstr(req, "OOM: failed to serialize JSON");
+            return ESP_FAIL;
+        }
+
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+        free(out);
+        return ESP_OK;
+    }
+
+    // 2) Extract ca_type
+    char ca_type[8] = {0}; // "https" or "mqtts"
+    err = extract_param_value_from_get_query(req, "ca_type", ca_type, sizeof(ca_type));
+    if (err != ESP_OK || ca_type[0] == '\0') {
+        cJSON_ReplaceItemInObject(root, "status", cJSON_CreateNumber((double)err));
+        cJSON_ReplaceItemInObject(root, "msg", cJSON_CreateString("missing or invalid ca_type"));
+
+        char *out = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+
+        if (!out) {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_set_type(req, "text/plain");
+            httpd_resp_sendstr(req, "OOM: failed to serialize JSON");
+            return ESP_FAIL;
+        }
+
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+        free(out);
+        return ESP_OK;
+    }
+
+    // 3) Map ca_type -> cert path
+    const char *cert_type = NULL;
+    const char *cert_path = NULL;
+
+    if (strcmp(ca_type, "https") == 0) {
+        cert_type = "https";
+        cert_path = CA_CERT_PATH_HTTPS;
+    } else if (strcmp(ca_type, "mqtts") == 0) {
+        cert_type = "mqtts";
+        cert_path = CA_CERT_PATH_MQTTS;
+    } else {
+        cJSON_ReplaceItemInObject(root, "status", cJSON_CreateNumber(3));
+        cJSON_ReplaceItemInObject(root, "msg", cJSON_CreateString("ca_type must be 'https' or 'mqtts'"));
+
+        char *out = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+
+        if (!out) {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_set_type(req, "text/plain");
+            httpd_resp_sendstr(req, "OOM: failed to serialize JSON");
+            return ESP_FAIL;
+        }
+
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+        free(out);
+        return ESP_OK;
+    }
+
+    // 4) Load certificate (allocated by load_ca_certificate; must free)
+    char *cert = NULL;
+    err = load_ca_certificate(&cert, cert_path);
+    if (err != ESP_OK || cert == NULL) {
+        ESP_LOGW(TAG, "Failed to load CA cert type=%s (err=0x%x)", cert_type, (unsigned)err);
+
+        cJSON_ReplaceItemInObject(root, "type", cJSON_CreateString(cert_type));
+        cJSON_ReplaceItemInObject(root, "status", cJSON_CreateNumber(4));
+        cJSON_ReplaceItemInObject(root, "msg", cJSON_CreateString("failed to load certificate"));
+
+        char *out = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+
+        if (!out) {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_set_type(req, "text/plain");
+            httpd_resp_sendstr(req, "OOM: failed to serialize JSON");
+            return ESP_FAIL;
+        }
+
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+        free(out);
+
+        if (cert) {
+            free(cert);
+        }
+        return ESP_OK;
+    }
+
+    // 5) Build success JSON
+    const size_t cert_len = strlen(cert);
+
+    cJSON_ReplaceItemInObject(root, "type", cJSON_CreateString(cert_type));
+    cJSON_ReplaceItemInObject(root, "size", cJSON_CreateNumber((double)cert_len));
+    cJSON_ReplaceItemInObject(root, "cert", cJSON_CreateString(cert)); // cJSON will escape newlines properly
+
+    // status=0 and msg="" already set
+
+    // 6) Serialize and respond
+    char *out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    if (!out) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_sendstr(req, "OOM: failed to serialize JSON");
+
+        free(cert);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+
+    free(out);
+    free(cert);
+
+    return ESP_OK;
+}
+
+/** HTTP Server control routines */
 
 /**
  * @brief Stop the HTTP server

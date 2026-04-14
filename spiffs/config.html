@@ -10,8 +10,14 @@
 
 
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@docsearch/css@3">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
-
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <style>
+      th, td {
+        padding: 1px;
+        padding-right: 5px;
+        vertical-align: middle
+      }
+    </style>
 </head>
 <body>
     <main>
@@ -26,7 +32,8 @@
     <div class="container">
     <h3>Device: {VAL_DEVICE_ID}</h3>
     <h5>Device Serial: {VAL_DEVICE_SERIAL}</h5>
-    <h5>{VAL_MESSAGE}</h5>
+    <h5 id="cfg_msg">{VAL_MESSAGE}</h5>
+    <div id="cfg_save_msg"></div>
     <form action="/submit" method="POST">
         <table border="0">
             <tr><td><b>MQTT</b></td><td></td></tr>
@@ -49,9 +56,6 @@
             <tr><td>MQTT User:</td><td><input type="text" name="mqtt_user" value="{VAL_MQTT_USER}" size="32" maxlength="{LEN_MQTT_USER}"></td></tr>
             <tr><td>MQTT Password:</td><td><input type="password" name="mqtt_password" value="{VAL_MQTT_PASSWORD}" size="32" maxlength="{LEN_MQTT_PASSWORD}"></td></tr>
             <tr><td>MQTT Prefix:</td><td><input type="text" name="mqtt_prefix" value="{VAL_MQTT_PREFIX}" size="32" maxlength="{LEN_MQTT_PREFIX}"></td></tr>
-            <tr><td><b>HomeAssistant Integration</b></td><td></td></tr>
-            <tr><td>HomeAssistant Device integration MQTT Prefix:</td><td><input type="text" name="ha_prefix" value="{VAL_HA_PREFIX}" size="32" maxlength="{LEN_HA_PREFIX}"></td></tr>
-            <tr><td>HomeAssistant Device update interval (ms):</td><td><input type="number" step="500" name="ha_upd_intervl" value="{VAL_HA_UPDATE_INTERVAL}" min="{MIN_HA_UPDATE_INTERVAL}" max="{MAX_HA_UPDATE_INTERVAL}"/>  ({MIN_HA_UPDATE_INTERVAL} - {MAX_HA_UPDATE_INTERVAL})</td></tr>
             <tr><td><b>Sensor Parameters</b></td><td></td></tr>
             <tr><td>Sensing interval (ms):</td><td><input type="number" step="100" name="sensor_intervl" value="{VAL_SENSOR_READ_INTERVAL}" min="{MIN_SENSOR_READ_INTERVAL}" max="{MAX_SENSOR_READ_INTERVAL}"> ({MIN_SENSOR_READ_INTERVAL} - {MAX_SENSOR_READ_INTERVAL})</td></tr>
             <tr><td>Sensor ADC Offset (V):</td><td><input type="number" step="0.001" name="sensor_offset" value="{VAL_SENSOR_OFFSET}" min="{MIN_SENSOR_OFFSET}" max="{MAX_SENSOR_OFFSET}"> ({MIN_SENSOR_OFFSET} - {MAX_SENSOR_OFFSET})</td></tr>
@@ -59,25 +63,89 @@
             <tr><td>Number of samples to collect per measurement:</td><td><input type="number" step="1" name="sensor_samples" value="{VAL_SENSOR_SAMPLING_COUNT}" min="{MIN_SENSOR_SAMPLING_COUNT}" max="{MAX_SENSOR_SAMPLING_COUNT}"/> ({MIN_SENSOR_SAMPLING_COUNT} - {MAX_SENSOR_SAMPLING_COUNT})</td></tr>
             <tr><td>Interval between samples (ms):</td><td><input type="number" step="1" name="sensor_smp_int" value="{VAL_SENSOR_SAMPLING_INTERVAL}" min="{MIN_SENSOR_SAMPLING_INTERVAL}" max="{MAX_SENSOR_SAMPLING_INTERVAL}"/> ({MIN_SENSOR_SAMPLING_INTERVAL} - {MAX_SENSOR_SAMPLING_INTERVAL})</td></tr>
             <tr><td>Threshold for samples filtering (%):</td><td><input type="number" step="1" name="sensor_deviate" value="{VAL_SENSOR_SAMPLING_MEDIAN_DEVIATION}" min="{MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION}" max="{MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION}"/> ({MIN_SENSOR_SAMPLING_MEDIAN_DEVIATION} - {MAX_SENSOR_SAMPLING_MEDIAN_DEVIATION})</td></tr>
+            <tr><td><b>HomeAssistant Integration</b></td><td></td></tr>
+            <tr><td>HomeAssistant Device integration MQTT Prefix:</td><td><input type="text" name="ha_prefix" value="{VAL_HA_PREFIX}" size="32" maxlength="{LEN_HA_PREFIX}"></td></tr>
+            <tr><td>HomeAssistant Device update interval (ms):</td><td><input type="number" step="500" name="ha_upd_intervl" value="{VAL_HA_UPDATE_INTERVAL}" min="{MIN_HA_UPDATE_INTERVAL}" max="{MAX_HA_UPDATE_INTERVAL}"/>  ({MIN_HA_UPDATE_INTERVAL} - {MAX_HA_UPDATE_INTERVAL})</td></tr>
+            <tr><td><b>System Update</b></td><td></td></tr>
+            <tr><td>OTA Update URL:</td><td style="vertical-align:top"><input type="text" id="ota_update_url" name="ota_update_url" value="{VAL_OTA_UPDATE_URL}" size="32" maxlength="{LEN_OTA_UPDATE_URL}"></td></tr>
+            <tr><td>OTA Update Reset Config:</td><td><select name="ota_upd_rescfg" id="ota_upd_rescfg">
+                  <option value="0" selected>Disabled</option>
+                  <option value="1">Enabled</option>
+                  </select>
+                </td>
+            </tr>
+            
         </table>
         <input type="submit" value="Save Settings">
         <input type="reset" value="Reset Changes">
     </form>
-    <br/>
-    <h3>CA / Root Certificate</h3>
-    <p>This is a CA certificate in PEM format that the device will use to validate the SSL certificate if you're using <tt>mqtts</tt> protocol.<br/><b>NOTE:</b> The entire certification path shall be represented, including the root and intermediate certificates, as the device has no root certificates installed.</p>
-    <form action="/ca-cert" method="POST">
-      <textarea id="ca_cert_id" name="ca_cert" rows="8" cols="40">{VAL_CA_CERT}</textarea>
       <br/>
-      <input type="submit" value="Save Certificate">
-      <input type="reset" value="Reset Changes">
-    </form>
-    <br/>
-    <h3>Device Management</h3>
-    <!-- Reboot button -->
-    <form action="/reboot" method="POST">
-        <input type="submit" value="Reboot Device">
-    </form>
+      <h3>CA / Root Certificates</h3>
+      <p>These are CA certificates in PEM format that the device will use to validate the SSL certificate if you're using <strong><tt>mqtts</tt></strong> protocol OR you are using <strong><tt>HTTPS URL</tt></strong> to load the firmware from.<br/><b>NOTE:</b> The entire certification path shall be represented, including the root and intermediate certificates, as the device has no root certificates installed.<br/><i>Max certificate size is {VAL_CA_CERT_LEN_MAX} bytes</i></p>
+      <nav>
+        <div class="nav nav-tabs" id="nav-tab" role="tablist">
+          <button class="nav-link active" id="nav-mqtts-tab" data-bs-toggle="tab" data-bs-target="#nav-mqtts" type="button" role="tab" aria-controls="nav-mqtts" aria-selected="true">MQTTS</button>
+          <button class="nav-link" id="nav-https-tab" data-bs-toggle="tab" data-bs-target="#nav-https" type="button" role="tab" aria-controls="nav-https" aria-selected="false">HTTPS</button>
+      </div>
+      </nav>
+      <div class="tab-content" id="nav-tabContent">
+        <div class="tab-pane fade show active" id="nav-mqtts" role="tabpanel" aria-labelledby="nav-mqtts-tab">
+          <!-- MQTTS CA Certificate form -->
+          <p>MQTTS CA Certificate:</p>
+          <form action="/ca-cert" method="POST">
+            <input type="hidden" name="cert_type" value="mqtts">
+            <textarea id="ca_cert_mqtts_id" name="ca_cert_mqtts" rows="8" cols="40" maxlength="{VAL_CA_CERT_LEN_MAX}">{VAL_CA_CERT_MQTTS}</textarea>
+            <br/>
+            <input type="submit" value="Save Certificate">
+            <input type="reset" value="Reset Changes">
+          </form>
+
+        </div>
+        <div class="tab-pane fade" id="nav-https" role="tabpanel" aria-labelledby="nav-https-tab">
+          <!-- HTTPS CA Certificate form -->
+          <p>HTTPS CA Certificate:</p>
+          <form action="/ca-cert" method="POST">
+            <input type="hidden" name="cert_type" value="https">
+            <textarea id="ca_cert_https_id" name="ca_cert_https" rows="8" cols="40" maxlength="{VAL_CA_CERT_LEN_MAX}">{VAL_CA_CERT_HTTPS}</textarea>
+            <br/>
+            <input type="submit" value="Save Certificate">
+            <input type="reset" value="Reset Changes">
+          </form>
+
+        </div>
+      </div>
+      
+      <br/>
+      <h3>Device Management</h3>
+      <table>
+        <tbody>
+          <tr>
+            <td>
+              <!-- Reboot button -->
+              <form action="/reboot" method="POST">
+                <input type="submit" value="Reboot Device">
+              </form>
+            </td>
+            <td>
+              <p>Reboot the device. Freshly made changes to the Configuration will be applied.</p>
+            </td>
+          </tr>
+          <tr>
+            <td>
+                <button type="button"
+                  id="otaUpdateBtnStandalone"
+                  class="btn btn-primary btn-sm">
+                  Update Device
+                </button>
+            </td>
+            <td>
+              <p>Download the firmware image using <tt>OTA Update URL</tt> and update the device. The device will reboot automatically after the update.</p>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+
     </div>
 
     <div class="container">
@@ -86,11 +154,14 @@
             <a href="/" class="mb-3 me-2 mb-md-0 text-body-secondary text-decoration-none lh-1">
               <svg class="bi" width="30" height="24"><use xlink:href="#bootstrap"/></svg>
             </a>
-            <span class="mb-3 mb-md-0 text-body-secondary">&copy; 2024 Roman Pavlyuk</span>
+            <span class="mb-3 mb-md-0 text-body-secondary">&copy; 2024-2026 Roman Pavlyuk.</span>
+          </div>
+          <div class="col-md-4 d-flex align-items-center">
+            <span class="mb-3 mb-md-0 text-body-secondary"> Version: {VAL_SW_VERSION}</span>
           </div>
       
           <ul class="nav col-md-4 justify-content-end list-unstyled d-flex">
-            <li class="ms-3"><a class="text-body-secondary" href="https://github.com/rpavlyuk/ESPZPressureSensor"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-github" viewBox="0 0 16 16">
+            <li class="ms-3"><a class="text-body-secondary" href="https://github.com/rpavlyuk/ESPPressureSensor"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-github" viewBox="0 0 16 16">
                 <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8"/>
               </svg></a></li>
             <li class="ms-3"><a class="text-body-secondary" href="https://fb.me/rpavlyuk"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-facebook" viewBox="0 0 16 16">
@@ -102,14 +173,18 @@
 
     </main>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    <script src="https://code.jquery.com/jquery-4.0.0.min.js" integrity="sha256-OaVG6prZf4v69dPg6PhVattBXkcOWQB62pdZ3ORyrao=" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    <script src="/static/shared.js"></script>
     <script>
-      function selectElement(id, valueToSelect) {    
-      let element = document.getElementById(id);
-        element.value = valueToSelect;
-      }
-
-      selectElement('mqtt_connect', '{VAL_MQTT_CONNECT}');
+      // Provide page-specific variables to script.js
+      window.PressureSensorConfig = {
+        deviceId:     "{VAL_DEVICE_ID}",
+        deviceSerial: "{VAL_DEVICE_SERIAL}",
+        swVersionNum: "{VAL_SW_VERSION_NUM}",      // e.g. "1.0.6"
+        swBuildNum:   "{VAL_SW_BUILD_NUM}"           // e.g. "20260203234334"
+      };
     </script>
+    <script src="/static/config.js"></script>
 </body>
 </html>
