@@ -52,6 +52,8 @@ esp_err_t start_mqtt_queue_task(void) {
     // Start the MQTT event task
     xTaskCreate(mqtt_event_task, "mqtt_event_task", 8192, NULL, 5, NULL);
 
+    
+
     return ESP_OK;
 }
 
@@ -101,10 +103,18 @@ void mqtt_event_task(void *arg) {
  *      - ESP_FAIL if the event cannot be sent to the queue
  */
 esp_err_t trigger_mqtt_publish(const sensor_data_t *sensor_data) {
+
+    // check if MQTT connection is enabled at all
+    uint16_t mqtt_connection_mode;
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
+    if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
+        ESP_LOGW(TAG, "MQTT is disabled in settings. Skipping MQTT publish.");
+        return ESP_FAIL;
+    }
+
+    // proceed only if MQTT is enabled
     sensor_event_t event;
-
     event.sensor_data = *sensor_data;
-
     ESP_LOGI(TAG, "%s: +-> Pushing MQTT publish event to the queue. Sensor data: %.2f Pa", __func__, event.sensor_data.pressure);
 
     // Send the event to the MQTT event task

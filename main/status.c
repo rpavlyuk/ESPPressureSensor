@@ -80,6 +80,17 @@ esp_err_t sensor_status_init(sensor_status_t *status_data) {
     status_data->free_heap = esp_get_free_heap_size();
     status_data->min_free_heap = esp_get_minimum_free_heap_size();
     status_data->time_since_boot = esp_timer_get_time();
+#if _DEVICE_ENABLE_STATUS_MEMGUARD
+    uint32_t memguard_threshold = S_DEFAULT_STATUS_MEMGUARD_THRESHOLD;
+    ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_STATUS_MEMGUARD_THRESHOLD, &memguard_threshold));
+    status_data->memguard_threshold = (size_t)memguard_threshold;
+    uint16_t memguard_mode = S_DEFAULT_STATUS_MEMGUARD_MODE;
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_STATUS_MEMGUARD_MODE, &memguard_mode));
+    status_data->memguard_mode = memguard_mode;
+#endif
+
+    ESP_LOGD(STATUS_TAG, "Device status initialized: Free heap (%u bytes), Min free heap (%u bytes), Time since boot (%llu microseconds)", 
+             status_data->free_heap, status_data->min_free_heap, (unsigned long long)status_data->time_since_boot);
 
     return ESP_OK;
 }

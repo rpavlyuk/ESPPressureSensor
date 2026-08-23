@@ -2,6 +2,7 @@
 #define STATUS_H
 
 #include <stddef.h>
+#include "cJSON.h"
 #include "esp_system.h"
 #include "common.h"
 
@@ -18,6 +19,8 @@ typedef struct {
     size_t free_heap;
     size_t min_free_heap;
     int64_t time_since_boot;
+    size_t memguard_threshold;
+    uint16_t memguard_mode;
 } sensor_status_t;
 
 void status_init(void);

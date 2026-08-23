@@ -172,9 +172,21 @@ void sensor_run(void *pvParameters) {
         ESP_LOGI(TAG, "Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.2f Pa", 
                  sensor_data.voltage_raw, sensor_data.voltage, sensor_data.pressure);
 
-        // Publish the sensor data via MQTT
-        if (trigger_mqtt_publish(&sensor_data) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to trigger MQTT publish");
+        // Publish the sensor data via MQTT if it is ready
+        bits = xEventGroupWaitBits(
+            g_sys_events,             // event group handle
+            BIT_WIFI_CONNECTED,       // bit(s) to wait for
+            pdFALSE,                  // don't clear the bit on exit
+            pdTRUE,                   // wait for all bits (only one here)
+            pdMS_TO_TICKS(wait_time_ms)      // timeout 30 seconds
+        );
+        if (bits & BIT_WIFI_CONNECTED) {
+            ESP_LOGI(TAG, "Wi-Fi is connected and provisioned. Proceeding to publish sensor data.");
+            if (trigger_mqtt_publish(&sensor_data) != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to trigger MQTT publish");
+            }
+        } else {
+            ESP_LOGW(TAG, "Wi-Fi is not ready. Skipping MQTT publish for this cycle.");
         }
 
         uint16_t sensor_intervl = S_DEFAULT_SENSOR_READ_INTERVAL;
@@ -361,6 +373,18 @@ cJSON *sensor_status_to_JSON(sensor_status_t *s_data) {
     if (j_time_since_boot != NULL) {
         cJSON_AddItemToObject(root, "time_since_boot", j_time_since_boot);
     }
+
+#if _DEVICE_ENABLE_STATUS_MEMGUARD
+    cJSON *j_memguard_threshold = cJSON_CreateNumber(s_data->memguard_threshold);
+    if (j_memguard_threshold != NULL) {
+        cJSON_AddItemToObject(root, "memguard_threshold", j_memguard_threshold);
+    }
+
+    cJSON *j_memguard_mode = cJSON_CreateNumber(s_data->memguard_mode);
+    if (j_memguard_mode != NULL) {
+        cJSON_AddItemToObject(root, "memguard_mode", j_memguard_mode);
+    }
+#endif
 
     return root;
 
