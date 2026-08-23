@@ -11,7 +11,7 @@
 
 #define PRESSURE_SENSOR_PIN     ADC_CHANNEL_3           // GPIO3 corresponds to ADC_CHANNEL_3 on the ESP32-C6
 #define ADC_WIDTH               ADC_WIDTH_BIT_12        // 12-bit ADC width for higher resolution
-#define ADC_ATTEN               ADC_ATTEN_DB_2_5        // Set attenuation
+#define ADC_ATTEN               ADC_ATTEN_DB_12        // Set attenuation
 
 #define REBOOT_ON_SENSOR_FAILURE true
 

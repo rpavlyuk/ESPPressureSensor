@@ -317,6 +317,21 @@ esp_err_t settings_init() {
         }
     }
 
+    // Parameter: Enable sensor sampling
+    uint16_t sensor_smp_en;
+    if (nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sensor_smp_en) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %i", S_KEY_SENSOR_SAMPLING_ENABLE, sensor_smp_en);
+    } else {
+        ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_SENSOR_SAMPLING_ENABLE);
+        sensor_smp_en = S_DEFAULT_SENSOR_SAMPLING_ENABLE;
+        if (nvs_write_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, sensor_smp_en) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %i", S_KEY_SENSOR_SAMPLING_ENABLE, sensor_smp_en);
+        } else {
+            ESP_LOGE(TAG, "Failed creating key %s with value %i", S_KEY_SENSOR_SAMPLING_ENABLE, sensor_smp_en);
+            return ESP_FAIL;
+        }
+    }
+
     // Parameter: Number of samples to collect per measurement
     uint16_t sensor_samples;
     if (nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sensor_samples) == ESP_OK) {
@@ -1346,8 +1361,63 @@ static esp_err_t handle_setting_sensor_read_interval(const char *key, const cJSO
         return ESP_ERR_INVALID_ARG;
     }
 
+    // Ensure that the read interval is a multiple of the sampling interval if sampling is enabled
+    // 1 - Check if sampling is enabled
+    uint16_t sampling_enabled = 0;
+    esp_err_t err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sampling_enabled);
+    if (err != ESP_OK) {
+        set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_SAMPLING_ENABLE, esp_err_to_name(err));
+        return err; 
+    }
+
+    // 2 - Get sampling interval and sampling count
+    uint16_t sampling_count = 0;
+    uint16_t sampling_interval = 0;
+    err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sampling_interval);
+    if (err != ESP_OK) {
+        set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_SAMPLING_INTERVAL, esp_err_to_name(err));
+        return err;
+    }
+    err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sampling_count);
+    if (err != ESP_OK) {
+        set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_SAMPLING_COUNT, esp_err_to_name(err));
+        return err;
+    }
+
+    // 3 - If sampling is enabled, check if read interval bigger than sampling interval * sampling count
+    if (sampling_enabled) {
+        uint32_t min_read_interval = sampling_interval * sampling_count;
+        if (v->valuedouble < min_read_interval) {
+            set_result(out, ESP_ERR_INVALID_ARG, "Sensor read interval must be greater than or equal to sampling interval * sampling count (%d)", min_read_interval);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+
     return ESP_OK; // generic writer will store it
 }
+
+/**
+ * @brief: Handle Sensor sampling enable setting validation handler
+ * 
+ * @param v: cJSON object containing the new Sensor sampling enable value
+ * @param[out] out: Pointer to setting_update_msg_t structure to store the result
+ * 
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
+static esp_err_t handle_setting_sensor_smp_en(const char *key, const cJSON *v, setting_update_msg_t *out) {
+    if (!cJSON_IsNumber(v)) {
+        set_result(out, ESP_ERR_INVALID_ARG, "Sensor sampling enable must be a number");
+        return ESP_ERR_INVALID_ARG;
+    }   
+
+    if (v->valueint < SENSOR_SAMPLING_ENABLE_MIN || v->valueint > SENSOR_SAMPLING_ENABLE_MAX) {
+        set_result(out, ESP_ERR_INVALID_ARG, "Sensor sampling enable must be between %d and %d", SENSOR_SAMPLING_ENABLE_MIN, SENSOR_SAMPLING_ENABLE_MAX);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return ESP_OK; // generic writer will store it
+}
+
 
 /**
  * @brief: Handle Sensor samples setting validation handler
@@ -1367,6 +1437,40 @@ static esp_err_t handle_setting_sensor_samples(const char *key, const cJSON *v, 
     if (v->valuedouble < SENSOR_SAMPLING_COUNT_MIN || v->valuedouble > SENSOR_SAMPLING_COUNT_MAX) {
         set_result(out, ESP_ERR_INVALID_ARG, "%s out of range (%d - %d)", key, SENSOR_SAMPLING_COUNT_MIN, SENSOR_SAMPLING_COUNT_MAX);
         return ESP_ERR_INVALID_ARG;
+    }
+
+    // Ensure that the read interval is a multiple of the sampling interval if sampling is enabled
+    // 1 - Check if sampling is enabled
+    uint16_t sampling_enabled = 0;
+    esp_err_t err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sampling_enabled);
+    if (err != ESP_OK) {
+        set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_SAMPLING_ENABLE, esp_err_to_name(err));
+        return err; 
+    }
+
+    // 2 - Get sampling interval and sampling count
+    uint16_t sampling_count = v->valueint;
+    uint16_t sampling_interval = 0;
+    err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sampling_interval);
+    if (err != ESP_OK) {
+        set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_SAMPLING_INTERVAL, esp_err_to_name(err));
+        return err;
+    }
+
+    // 3 - If sampling is enabled, check if read interval bigger than sampling interval * sampling count
+    if (sampling_enabled) {
+        // Get the current read interval from NVS to compare
+        uint16_t read_interval = 0;
+        err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &read_interval);
+        if (err != ESP_OK) {
+            set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_READ_INTERVAL, esp_err_to_name(err));
+            return err;
+        }
+        uint16_t min_read_interval = sampling_interval * sampling_count;
+        if (read_interval < min_read_interval) {
+            set_result(out, ESP_ERR_INVALID_ARG, "Sensor read interval must be greater than or equal to sampling interval * sampling count (%d)", min_read_interval);
+            return ESP_ERR_INVALID_ARG;
+        }
     }
 
     return ESP_OK; // generic writer will store it
@@ -1390,6 +1494,40 @@ static esp_err_t handle_setting_sensor_smp_int(const char *key, const cJSON *v, 
     if (v->valuedouble < SENSOR_SAMPLING_INTERVAL_MIN || v->valuedouble > SENSOR_SAMPLING_INTERVAL_MAX) {
         set_result(out, ESP_ERR_INVALID_ARG, "%s out of range (%d - %d)", key, SENSOR_SAMPLING_INTERVAL_MIN, SENSOR_SAMPLING_INTERVAL_MAX);
         return ESP_ERR_INVALID_ARG;
+    }
+
+    // Ensure that the read interval is a multiple of the sampling interval if sampling is enabled
+    // 1 - Check if sampling is enabled
+    uint16_t sampling_enabled = 0;
+    esp_err_t err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sampling_enabled);
+    if (err != ESP_OK) {
+        set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_SAMPLING_ENABLE, esp_err_to_name(err));
+        return err; 
+    }
+
+    // 2 - Get sampling interval and sampling count
+    uint16_t sampling_count = 0;
+    uint16_t sampling_interval = v->valueint;
+    err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sampling_count);
+    if (err != ESP_OK) {
+        set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_SAMPLING_COUNT, esp_err_to_name(err));
+        return err;
+    }
+
+    // 3 - If sampling is enabled, check if read interval bigger than sampling interval * sampling count
+    if (sampling_enabled) {
+        // Get the current read interval from NVS to compare
+        uint16_t read_interval = 0;
+        err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &read_interval);
+        if (err != ESP_OK) {
+            set_result(out, err, "Failed to read %s: %s", S_KEY_SENSOR_READ_INTERVAL, esp_err_to_name(err));
+            return err;
+        }
+        uint16_t min_read_interval = sampling_interval * sampling_count;
+        if (read_interval < min_read_interval) {
+            set_result(out, ESP_ERR_INVALID_ARG, "Sensor read interval must be greater than or equal to sampling interval * sampling count (%d)", min_read_interval);
+            return ESP_ERR_INVALID_ARG;
+        }
     }
 
     return ESP_OK; // generic writer will store it

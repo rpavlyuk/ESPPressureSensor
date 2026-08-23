@@ -30,6 +30,9 @@ extern int device_ready;
 #define SENSOR_READ_INTERVAL_MIN    1000
 #define SENSOR_READ_INTERVAL_MAX    60000
 
+#define SENSOR_SAMPLING_ENABLE_MIN    0
+#define SENSOR_SAMPLING_ENABLE_MAX    1
+
 #define SENSOR_SAMPLING_COUNT_MIN    1
 #define SENSOR_SAMPLING_COUNT_MAX    100
 
@@ -92,6 +95,7 @@ extern int device_ready;
 #define S_KEY_SENSOR_LINEAR_MULTIPLIER  "sensor_multipl"
 #define S_KEY_SENSOR_READ_INTERVAL      "sensor_intervl"
 
+#define S_KEY_SENSOR_SAMPLING_ENABLE               "sensor_smp_en"
 #define S_KEY_SENSOR_SAMPLING_COUNT                "sensor_samples"
 #define S_KEY_SENSOR_SAMPLING_INTERVAL             "sensor_smp_int"
 #define S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION     "sensor_deviate"
@@ -129,6 +133,7 @@ extern int device_ready;
 #define S_DEFAULT_SENSOR_LINEAR_MULTIPLIER    250000
 #define S_DEFAULT_SENSOR_READ_INTERVAL        3000      // ms
 
+#define S_DEFAULT_SENSOR_SAMPLING_ENABLE                0
 #define S_DEFAULT_SENSOR_SAMPLING_COUNT                 50  // Number of samples to collect per measurement
 #define S_DEFAULT_SENSOR_SAMPLING_INTERVAL              10  // Interval between samples in milliseconds
 #define S_DEFAULT_SENSOR_SAMPLING_MEDIAN_DEVIATION      10  // Threshold percentage for filtering
@@ -213,6 +218,7 @@ static esp_err_t handle_setting_ota_upd_rescfg(const char *key, const cJSON *v, 
 static esp_err_t handle_setting_sensor_offset(const char *key, const cJSON *v, setting_update_msg_t *out);
 static esp_err_t handle_setting_sensor_linear_multiplier(const char *key, const cJSON *v, setting_update_msg_t *out);
 static esp_err_t handle_setting_sensor_read_interval(const char *key, const cJSON *v, setting_update_msg_t *out);
+static esp_err_t handle_setting_sensor_smp_en(const char *key, const cJSON *v, setting_update_msg_t *out);
 static esp_err_t handle_setting_sensor_samples(const char *key, const cJSON *v, setting_update_msg_t *out);
 static esp_err_t handle_setting_sensor_smp_int(const char *key, const cJSON *v, setting_update_msg_t *out);
 static esp_err_t handle_setting_sensor_smp_deviate(const char *key, const cJSON *v, setting_update_msg_t *out);
@@ -241,6 +247,7 @@ static const setting_entry_t s_settings[] = {
     { S_KEY_SENSOR_OFFSET, handle_setting_sensor_offset, 0, SETTING_TYPE_FLOAT },
     { S_KEY_SENSOR_LINEAR_MULTIPLIER, handle_setting_sensor_linear_multiplier, 0, SETTING_TYPE_UINT32},
     { S_KEY_SENSOR_READ_INTERVAL, handle_setting_sensor_read_interval, 0, SETTING_TYPE_UINT16 },
+    { S_KEY_SENSOR_SAMPLING_ENABLE, handle_setting_sensor_smp_en, 0, SETTING_TYPE_UINT16 },
     { S_KEY_SENSOR_SAMPLING_COUNT, handle_setting_sensor_samples, 0, SETTING_TYPE_UINT16 },
     { S_KEY_SENSOR_SAMPLING_INTERVAL, handle_setting_sensor_smp_int, 0, SETTING_TYPE_UINT16 },
     { S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, handle_setting_sensor_smp_deviate, 0, SETTING_TYPE_UINT16 },

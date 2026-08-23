@@ -59,6 +59,7 @@ You may consider the other IO pin so you can change `PRESSURE_SENSOR_PIN` in fil
    ```bash
    . $HOME/esp/esp-idf/export.sh
    ```
+3. **Important (!)**: Check setting `PRESSURE_SENSOR_PIN` in file `main/sensor.h` and make sure it corresponds to a correct ADC pin mapping if you're other than ESP32-C6 device. ADC channel mapping differs from variant to variant!
 4. **Build the firmware**:
    ```bash
    idf.py build
@@ -115,7 +116,7 @@ You may consider the other IO pin so you can change `PRESSURE_SENSOR_PIN` in fil
   * `Sensing interval (ms)`: how often to read the data from sensor
   * `Sensor ADC Offset (V)`: calibration parameter. It represents which voltage corresponds to a zero pressure. We will explain calibration in separate section.
   * `Sensor Linear Multiplier`: this is a linear multiplier (dependency) between voltage in Volts and pressure in Pascals. No need to change it unless you know why.
-  * `Number of samples to collect per measurement`, `Interval between samples (ms)`, `Threshold for samples filtering (%)`: these are advanced measurement sampling parameters. The device implements smart measurement when collects N samples of voltage (ADC) per one measurement with certain small interval, calculates the mediane and drops all other then deviate from median by certain threshold.
+  * `Sampling enabled`, `Number of samples to collect per measurement`, `Interval between samples (ms)`, `Threshold for samples filtering (%)`: these are advanced measurement sampling parameters. The device implements smart measurement when collects N samples of voltage (ADC) per one measurement with certain small interval, calculates the mediane and drops all other then deviate from median by certain threshold. Sampling is disabled by default.
 * System Update:
   * `OTA Update URL`: A URL pointing to `.bin` file with the firmware which you want to update the system to. See section *OTA Firmware Update* below for details. The UI client will also try to check if there's new version at the provided URL but looking for `build_info.json` file in the same directory as firmware file.
   * `OTA Update Reset Config`: Reset device configuration (except Wi-Fi) once OTA is performed. Useful when data model has been migrated.
@@ -134,6 +135,7 @@ The device will automatically enable itself in Home Assistant if:
 * auto-discovery is enable in Home Assistant (should be enabled by default)
 
 ## WEB API
+*To be documented*
 The device is exposing a simple read-only API URL to get the device status and sensor data.
 ```
 http://<WIFI-IP>/status-data

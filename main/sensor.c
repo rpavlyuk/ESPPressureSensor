@@ -157,11 +157,44 @@ void sensor_run(void *pvParameters) {
     ESP_LOGI(TAG, "Starting pressure sensing cycle");
 
     while (1) {
-        // Read the raw sensor value from ADC
-        sensor_data.voltage_raw = perform_smart_sampling(adc1_cali_pressure_sensor_handle, adc1_handle, PRESSURE_SENSOR_PIN, do_calibration1_pressure_sensor);
+        // Get sampling enabled flag from NVS
+        uint16_t sensor_smp_en = S_DEFAULT_SENSOR_SAMPLING_ENABLE;
+        ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sensor_smp_en));
 
-        // Obtain the voltage in Volts
-        sensor_data.voltage = sensor_data.voltage_raw / 1000.0;
+        // Read the raw sensor value from ADC
+        if (sensor_smp_en) {
+            ESP_LOGI(TAG, "Sensor sampling is enabled. Performing smart sampling.");
+            sensor_data.voltage_raw = perform_smart_sampling(adc1_cali_pressure_sensor_handle, adc1_handle, PRESSURE_SENSOR_PIN, do_calibration1_pressure_sensor);
+            // Obtain the voltage in Volts
+            sensor_data.voltage = sensor_data.voltage_raw / 1000.0;
+        } else {
+            ESP_LOGI(TAG, "Sensor sampling is disabled. Performing single ADC read.");
+
+            int adc_raw;
+            int voltage_mv;
+
+            ESP_ERROR_CHECK(adc_oneshot_read(
+                adc1_handle,
+                PRESSURE_SENSOR_PIN,
+                &adc_raw
+            ));
+
+            sensor_data.voltage_raw = adc_raw;
+
+            if (do_calibration1_pressure_sensor) {
+                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(
+                    adc1_cali_pressure_sensor_handle,
+                    adc_raw,
+                    &voltage_mv
+                ));
+
+                sensor_data.voltage = voltage_mv / 1000.0;  // Convert mV to V
+            } else {
+                ESP_LOGE(TAG, "Cannot convert ADC raw value to voltage: calibration unavailable");
+                continue;
+            }
+        }
+        
 
         // Calculate pressure in KPa using the provided formula
         ESP_ERROR_CHECK(nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_data.voltage_offset));
@@ -236,8 +269,13 @@ float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_uni
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int));
     ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
 
+    if (sensor_samples == 0 || sensor_samples > SENSOR_SAMPLING_COUNT_MAX) {
+        ESP_LOGE(TAG, "Invalid sampling count: %u", sensor_samples);
+        return NAN;
+    }
+
     int samples[sensor_samples];
-    float filtered_samples[sensor_smp_int];
+    float filtered_samples[sensor_samples];
     int num_filtered_samples = 0;
 
     // Collect NUM_SAMPLES samples every SAMPLE_INTERVAL_MS
@@ -257,7 +295,8 @@ float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_uni
     num_filtered_samples = 0;
     for (int i = 0; i < (int)sensor_samples; i++) {
         float deviation = fabs((float)(samples[i] - median) / median * 100);
-        if (deviation <= sensor_deviate) {
+        if (deviation <= sensor_deviate &&
+            num_filtered_samples < sensor_samples) {
             filtered_samples[num_filtered_samples++] = samples[i];
         }
     }
@@ -385,6 +424,14 @@ cJSON *sensor_status_to_JSON(sensor_status_t *s_data) {
         cJSON_AddItemToObject(root, "memguard_mode", j_memguard_mode);
     }
 #endif
+
+    // get the sensor sampling enabled flag from NVS
+    uint16_t sensor_smp_en = S_DEFAULT_SENSOR_SAMPLING_ENABLE;
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sensor_smp_en));
+    cJSON *j_sensor_sampling_enabled = cJSON_CreateNumber(sensor_smp_en);
+    if (j_sensor_sampling_enabled != NULL) {
+        cJSON_AddItemToObject(root, "sensor_sampling_enabled", j_sensor_sampling_enabled);
+    }
 
     return root;
 

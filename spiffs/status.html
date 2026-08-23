@@ -39,6 +39,7 @@
                 <tr><td>Voltage Offset</td><td><span id="val_voltage_offset"></span> V</td></tr>
                 <tr><td>Sensor Linear Multiplier</td><td><span id="val_sensor_linear_multiplier"></span></td></tr>
                 <tr><td>Raw Voltage</td><td><span id="val_voltage_raw"></span></td></tr>
+                <tr><td>Sampling</td><td><span id="val_sampling_enabled"></span></td></tr>
                 
                 <tr><td><b>Device Status</b></td><td></td></tr>
                 <tr><td>Free Heap</td><td><span id="val_free_heap"></span> bytes</td></tr>
@@ -103,12 +104,14 @@
                 $('#val_voltage_offset').text(response.sensor.voltage_offset.toFixed(3));
                 $('#val_sensor_linear_multiplier').text(response.sensor.sensor_linear_multiplier);
                 $('#val_voltage_raw').text(response.sensor.voltage_raw);
+                $('#val_sampling_enabled').text(response.status.sensor_sampling_enabled == 1 ? "Enabled" : "Disabled");
 
                 $('#val_free_heap').text(response.status.free_heap);
                 $('#val_min_free_heap').text(response.status.min_free_heap);
                 // Convert time since boot to a readable format and update the element
                 let time_since_boot = formatTimeSinceBoot(response.status.time_since_boot);
                 $('#val_time_since_boot').text(time_since_boot);
+                
             },
             error: function() {
                 console.error("Failed to fetch sensor data");

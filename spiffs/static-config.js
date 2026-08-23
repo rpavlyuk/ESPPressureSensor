@@ -161,6 +161,7 @@ $(function () {
     }
     setNumberByName("sensor_offset", offsetField);
     setNumberByName("sensor_multipl", getField(data, "sensor_multipl"));
+    setSelectById("sensor_smp_en", getField(data, "sensor_smp_en"));
     setNumberByName("sensor_samples", getField(data, "sensor_samples"));
     setNumberByName("sensor_smp_int", getField(data, "sensor_smp_int"));
     setNumberByName("sensor_deviate", getField(data, "sensor_deviate"));
@@ -298,23 +299,33 @@ $(function () {
   }
 
   function applyPerFieldErrors($form, resp) {
-    // Supports resp.data[field].status/msg OR resp.fields[field].status/msg
-    const map = (resp && resp.data && typeof resp.data === "object") ? resp.data :
-                (resp && resp.fields && typeof resp.fields === "object") ? resp.fields :
-                null;
+    const map =
+      (resp && resp.details && typeof resp.details === "object")
+        ? resp.details
+        : null;
 
     if (!map) return false;
 
     let anyFieldErrors = false;
 
-    Object.keys(map).forEach(function (k) {
-      const entry = map[k];
+    Object.keys(map).forEach(function (fieldName) {
+      const entry = map[fieldName];
+
       if (!entry || typeof entry !== "object") return;
 
-      const st = (typeof entry.status === "number") ? entry.status : null;
-      if (st !== null && st !== 0) {
+      const status =
+        typeof entry.status === "number"
+          ? entry.status
+          : Number(entry.status);
+
+      if (Number.isFinite(status) && status !== 0) {
         anyFieldErrors = true;
-        showFieldError($form, k, entry.msg || ("Error code: " + st));
+
+        showFieldError(
+          $form,
+          fieldName,
+          entry.error_msg || "Invalid value"
+        );
       }
     });
 
@@ -358,14 +369,28 @@ $(function () {
       .done(function (resp) {
         const anyFieldErrors = applyPerFieldErrors($form, resp);
 
-        // Determine global status
-        const st = (resp && typeof resp.status === "number") ? resp.status : (anyFieldErrors ? 1 : 0);
-        const msg = (resp && resp.msg) ? resp.msg : (st === 0 ? "Saved successfully" : "Failed to save");
+        const summary =
+          resp && resp.status && typeof resp.status === "object"
+            ? resp.status
+            : {};
 
-        if (st === 0 && !anyFieldErrors) {
-          showSaveMsg(msg, false);
+        const failed = Number(summary.failed || 0);
+        const succeeded = Number(summary.success || 0);
+        const total = Number(summary.total || 0);
+
+        if (failed === 0 && !anyFieldErrors) {
+          showSaveMsg(
+            total > 0
+              ? `Saved successfully (${succeeded}/${total} settings)`
+              : "Saved successfully",
+            false
+          );
         } else {
-          showSaveMsg("ERROR: " + msg, true);
+          showSaveMsg(
+            `ERROR: ${failed || 1} setting${failed === 1 ? "" : "s"} failed to save` +
+            (succeeded > 0 ? `; ${succeeded} saved successfully` : ""),
+            true
+          );
         }
       })
       .fail(function (xhr, status) {
