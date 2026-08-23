@@ -1,6 +1,6 @@
 #
 # Automatically generated file. DO NOT EDIT.
-# Espressif IoT Development Framework (ESP-IDF) 6.0.0 Project Configuration
+# Espressif IoT Development Framework (ESP-IDF) 6.0.2 Project Configuration
 #
 # default:
 CONFIG_SOC_ADC_SUPPORTED=y
@@ -449,11 +449,7 @@ CONFIG_SOC_SPI_MEM_SUPPORT_CHECK_SUS=y
 # default:
 CONFIG_SOC_SPI_MEM_SUPPORT_WRAP=y
 # default:
-CONFIG_SOC_MEMSPI_SRC_FREQ_80M_SUPPORTED=y
-# default:
-CONFIG_SOC_MEMSPI_SRC_FREQ_40M_SUPPORTED=y
-# default:
-CONFIG_SOC_MEMSPI_SRC_FREQ_20M_SUPPORTED=y
+CONFIG_SOC_MEMSPI_ENCRYPTION_ALIGNMENT=16
 # default:
 CONFIG_SOC_SYSTIMER_COUNTER_NUM=2
 # default:
@@ -522,6 +518,8 @@ CONFIG_SOC_FLASH_ENCRYPTED_XTS_AES_BLOCK_MAX=64
 CONFIG_SOC_FLASH_ENCRYPTION_XTS_AES=y
 # default:
 CONFIG_SOC_FLASH_ENCRYPTION_XTS_AES_128=y
+# default:
+CONFIG_SOC_FLASH_ENCRYPTION_PAGE_CONFIGURABLE=y
 # default:
 CONFIG_SOC_APM_CTRL_FILTER_SUPPORTED=y
 # default:
@@ -747,6 +745,11 @@ CONFIG_APP_BUILD_USE_FLASH_SECTIONS=y
 # default:
 # CONFIG_APP_NO_BLOBS is not set
 # end of Build type
+
+#
+# App Update config
+#
+# end of App Update config
 
 #
 # Bootloader config
@@ -1141,16 +1144,29 @@ CONFIG_COMPILER_CXX_GLIBCXX_CONSTEXPR_NO_CHANGE=y
 #
 
 #
-# BLE Log
+# BT Logs
+#
+
+#
+# Log Sources
 #
 # default:
-# CONFIG_BLE_LOG_ENABLED is not set
-# end of BLE Log
+# CONFIG_BT_LE_CONTROLLER_LOG_ENABLED is not set
+# end of Log Sources
 
 # default:
-# CONFIG_BT_BLE_LOG_SPI_OUT_ENABLED is not set
+# CONFIG_BT_LOG_CRITICAL_ONLY is not set
 # default:
-# CONFIG_BT_BLE_LOG_UHCI_OUT_ENABLED is not set
+# CONFIG_BLE_LOG_ENABLED is not set
+
+#
+# Legacy SPI Log Output (Deprecated - use BT Log Async Output instead)
+#
+# default:
+# CONFIG_BT_BLE_LOG_SPI_OUT_ENABLED is not set
+# end of Legacy SPI Log Output (Deprecated - use BT Log Async Output instead)
+# end of BT Logs
+
 # default:
 # CONFIG_BT_LE_USED_MEM_STATISTICS_ENABLED is not set
 # end of Common Options
@@ -1530,6 +1546,8 @@ CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 # CONFIG_ESP_HTTP_CLIENT_ENABLE_GET_CONTENT_RANGE is not set
 # default:
 CONFIG_ESP_HTTP_CLIENT_EVENT_POST_TIMEOUT=2000
+# default:
+# CONFIG_ESP_HTTP_CLIENT_SAVE_RESPONSE_HEADERS is not set
 # end of ESP HTTP client
 
 #
@@ -1858,6 +1876,8 @@ CONFIG_ESP_PHY_PLL_TRACK_PERIOD_MS=1000
 CONFIG_ESP_PHY_IRAM_OPT=y
 # default:
 # CONFIG_ESP_PHY_DEBUG is not set
+# default:
+CONFIG_ESP_PHY_ENABLE_VERSION_PRINT=y
 # end of PHY
 
 #
@@ -2213,6 +2233,8 @@ CONFIG_ESP_WIFI_TX_HETB_QUEUE_NUM=3
 CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=y
 # default:
 # CONFIG_ESP_WIFI_ENT_FREE_DYNAMIC_BUFFER is not set
+# default:
+# CONFIG_ESP_WIFI_PASSIVE_HIDDEN_AP_SUPPORT is not set
 # end of Wi-Fi
 
 #
@@ -2511,11 +2533,11 @@ CONFIG_IEEE802154_PENDING_TABLE_SIZE=20
 # default:
 # CONFIG_IEEE802154_MULTI_PAN_ENABLE is not set
 # default:
+CONFIG_IEEE802154_INTERFACE_NUM=1
+# default:
 CONFIG_IEEE802154_TIMING_OPTIMIZATION=y
 # default:
 # CONFIG_IEEE802154_DEBUG is not set
-# default:
-# CONFIG_IEEE802154_DEBUG_ASSERT_MONITOR is not set
 # end of IEEE 802.15.4
 
 #
@@ -3063,8 +3085,6 @@ CONFIG_MBEDTLS_TLS_SERVER_AND_CLIENT=y
 # default:
 # CONFIG_MBEDTLS_TLS_CLIENT_ONLY is not set
 # default:
-# CONFIG_MBEDTLS_TLS_DISABLED is not set
-# default:
 # CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE is not set
 # default:
 # CONFIG_MBEDTLS_SSL_CONTEXT_SERIALIZATION is not set
@@ -3149,8 +3169,6 @@ CONFIG_MBEDTLS_CMAC_C=y
 #
 # Asymmetric Ciphers
 #
-# default:
-CONFIG_MBEDTLS_BIGNUM_C=y
 # default:
 CONFIG_MBEDTLS_RSA_C=y
 # default:
@@ -3310,6 +3328,8 @@ CONFIG_MBEDTLS_PKCS1_V21=y
 # CONFIG_NVS_LEGACY_DUP_KEYS_COMPATIBILITY is not set
 # default:
 # CONFIG_NVS_BDL_STACK is not set
+# default:
+# CONFIG_NVS_FLASH_VERIFY_ERASE is not set
 # end of NVS
 
 #
@@ -3583,6 +3603,8 @@ CONFIG_VFS_SUPPRESS_SELECT_DEBUG_OUTPUT=y
 # CONFIG_VFS_SUPPORT_TERMIOS is not set
 # default:
 CONFIG_VFS_MAX_COUNT=8
+# default:
+# CONFIG_VFS_SUPPRESS_CTX_DEPRECATION is not set
 
 #
 # Host File System I/O (Semihosting)
