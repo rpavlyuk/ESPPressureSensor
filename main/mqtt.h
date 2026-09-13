@@ -25,8 +25,8 @@
  */
 typedef enum {
     MQTT_CONN_MODE_DISABLE = 0,           // soft disable MQTT
-    MQTT_CONN_MODE_NO_RECONNECT,      // connect initially to MQTT, but do NOT reconnect
-    MQTT_CONN_MODE_AUTOCONNECT,       // connect initially to MQTT and reconnect when lost
+    MQTT_CONN_MODE_NO_RECONNECT,          // connect initially to MQTT, but do NOT reconnect
+    MQTT_CONN_MODE_AUTOCONNECT,           // connect initially to MQTT and reconnect when lost
 } mqtt_connection_mode_t;
 
 /**
@@ -52,6 +52,9 @@ esp_err_t mqtt_init(void);
 
 // Function to publish sensor data
 esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data);
+
+// Function to publish system information to MQTT
+esp_err_t mqtt_publish_system_info(sensor_status_t *status);
 
 // publish device definitions to Home Assistant
 esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *mqtt_prefix, const char *homeassistant_prefix);

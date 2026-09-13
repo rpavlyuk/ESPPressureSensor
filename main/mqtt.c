@@ -500,6 +500,149 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *sensor_data) {
     }
 }
 
+
+/**
+ * @brief Publish system information to MQTT.
+ * 
+ * This function publishes the system information to MQTT. The function reads the
+ * device status from the provided structure and publishes the data to the appropriate
+ * MQTT topics. The function also reads the MQTT prefix and device ID from NVS to
+ * construct the MQTT topics.
+ * 
+ * @param[in] status The device status to publish.
+ * 
+ * @return esp_err_t    ESP_OK on success, ESP_FAIL if the data cannot be published.
+ */
+esp_err_t mqtt_publish_system_info(sensor_status_t *status) {
+    // It makes no sense to proceed if status object is NULL
+    if (status == NULL) {
+        ESP_LOGE(TAG, "Got NULL as status in %s", __func__);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Publish system information to MQTT: Uptime (%llu microseconds), Free heap (%u bytes), Min free heap (%u bytes), Memguard threshold (%u bytes), Memguard mode (%u)", 
+            (unsigned long long)status->time_since_boot, status->free_heap, status->min_free_heap, status->memguard_threshold, status->memguard_mode);
+
+    
+    /* Process MQTT connection mode: check if MQTT is enabled and client is connected */
+    uint16_t mqtt_connection_mode;
+    esp_err_t err;
+
+    // Read MQTT connection mode from NVS
+    err = nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MQTT connection mode from NVS");
+        return ESP_FAIL;
+    }
+
+    // Check if MQTT is disabled in the device settings
+    if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
+        ESP_LOGW(TAG, "MQTT disabled in device settings. Publishing skipped. That's not an issue.");
+        return ESP_OK;
+    }
+
+    // Ensure MQTT client is initialized and connected
+    dump_sys_bits("MQTT system status: Before MQTT client check");
+    if (mqtt_client == NULL || !IS_MQTT_CONNECTED()) {
+        ESP_LOGW(TAG, "MQTT client is not initialized or not connected.");
+        // skip publishing system info if MQTT is not connected, but don't treat it as an error
+        ESP_LOGW(TAG, "Skipping MQTT publish due to disconnected client.");
+        dump_sys_bits("MQTT system status: MQTT client not connected");
+        return ESP_FAIL;
+    }
+
+    // Read MQTT prefix and device ID from NVS
+    char *mqtt_prefix = NULL;
+    char *device_id = NULL;
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
+
+    // Publish system information to MQTT
+    char topic[256];
+    int msg_id;
+    bool is_error = false;
+    char value[32];
+
+    // Publish entire status as JSON
+    snprintf(topic, sizeof(topic), "%s/%s/system", mqtt_prefix, device_id);
+    char *payload = serialize_sensor_status(status);
+    ESP_LOGI(TAG, "Publishing system information to MQTT topic: %s", topic);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic, payload, 0, 1, 0);
+    if (msg_id < 0) {
+        ESP_LOGE(TAG, "Failed to publish system information to MQTT topic: %s", topic);
+        free(mqtt_prefix);
+        free(device_id);
+        free(payload);
+        return ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "System information published to MQTT topic: %s, msg_id: %d", topic, msg_id);
+    }
+
+    // Publish individual fields for compatibility
+    // Uptime
+    snprintf(topic, sizeof(topic), "%s/%s/system/uptime", mqtt_prefix, device_id);
+    snprintf(value, sizeof(value), "%llu", (unsigned long long)status->time_since_boot);
+    ESP_LOGI(TAG, "mqtt_publish_system_info: Publish value (%s) to topic (%s)", value, topic);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic, value, 0, MQTT_QOS_PUBLISH, 0);
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "Topic %s not published", topic);
+        is_error = true;
+    }
+
+    // Free heap
+    snprintf(topic, sizeof(topic), "%s/%s/system/free_heap", mqtt_prefix, device_id);
+    snprintf(value, sizeof(value), "%u", status->free_heap);
+    ESP_LOGI(TAG, "mqtt_publish_system_info: Publish value (%s) to topic (%s)", value, topic);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic, value, 0, MQTT_QOS_PUBLISH, 0);
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "Topic %s not published", topic);
+        is_error = true;
+    }
+
+    // Min free heap
+    snprintf(topic, sizeof(topic), "%s/%s/system/min_free_heap", mqtt_prefix, device_id);
+    snprintf(value, sizeof(value), "%u", status->min_free_heap);
+    ESP_LOGI(TAG, "mqtt_publish_system_info: Publish value (%s) to topic (%s)", value, topic);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic, value, 0, MQTT_QOS_PUBLISH, 0);
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "Topic %s not published", topic);
+        is_error = true;
+    }
+#if _DEVICE_ENABLE_STATUS_MEMGUARD
+    // memguard threshold
+    snprintf(topic, sizeof(topic), "%s/%s/system/memguard_threshold", mqtt_prefix, device_id);
+    snprintf(value, sizeof(value), "%u", status->memguard_threshold);
+    ESP_LOGI(TAG, "mqtt_publish_system_info: Publish value (%s) to topic (%s)", value, topic);
+    msg_id = esp_mqtt_client_publish(mqtt_client,   topic, value, 0, MQTT_QOS_PUBLISH, 0);
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "Topic %s not published", topic);
+        is_error = true;
+    }
+
+    // memguard mode
+    snprintf(topic, sizeof(topic), "%s/%s/system/memguard_mode", mqtt_prefix, device_id);
+    snprintf(value, sizeof(value), "%u", status->memguard_mode);
+    ESP_LOGI(TAG, "mqtt_publish_system_info: Publish value (%s) to topic (%s)", value, topic);
+    msg_id = esp_mqtt_client_publish(mqtt_client, topic, value, 0, MQTT_QOS_PUBLISH, 0);
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "Topic %s not published", topic);
+        is_error = true;
+    }
+#endif
+    
+    free(mqtt_prefix);
+    free(device_id);
+    free(payload);
+
+    if (is_error) {
+        ESP_LOGE(TAG, "There were errors when publishing system information to MQTT");
+        return ESP_FAIL;
+    } else {
+        ESP_LOGI(TAG, "MQTT system information published successfully.");
+    }
+    return ESP_OK;
+}
+
 /**
  * @brief Cleans up the MQTT client resources.
  */

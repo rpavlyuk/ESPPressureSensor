@@ -23,6 +23,8 @@ typedef struct {
     uint16_t memguard_mode;
 } sensor_status_t;
 
+void status_task(void *pvParameters);
+
 void status_init(void);
 
 esp_err_t sensor_status_init(sensor_status_t *status_data);
