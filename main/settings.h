@@ -5,6 +5,8 @@
 #include "mqtt.h"
 #include "cJSON.h"
 
+#include "net_logging.h"
+
 /**
  * Initialization variables
  */
@@ -367,6 +369,11 @@ esp_err_t check_ota_partitions(void);
  * @brief: OTA update task
  */
 void ota_update_task(void *param);
+
+/**
+ * @brief: Setup network logging
+ */
+esp_err_t setup_remote_logging(void);
 
 /* System Control routines*/
 

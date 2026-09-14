@@ -1983,6 +1983,64 @@ void ota_update_task(void *param) {
     vTaskDelete(NULL);   // Delete the OTA update task
 }
 
+/**
+ * @brief: Setup network logging configuration
+ * 
+ * @return ESP_OK on success, ESP_FAIL otherwise
+ */
+esp_err_t setup_remote_logging() {
+
+    // get logging type from NVS
+    uint16_t net_log_type = S_DEFAULT_NET_LOGGING_TYPE;
+    nvs_read_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_TYPE, &net_log_type);
+    
+    // if remote logging is disabled, exit
+    if (net_log_type < 1) {
+        ESP_LOGW(TAG, "Remote logging is disabled by configuration. Exiting logging setup.");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Setting up remote logging...");
+
+    int16_t write_to_stdout = 1; // enable STDOUT by default
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_KEEP_STDOUT, &write_to_stdout));
+    if (write_to_stdout) {
+        ESP_LOGI(TAG, "Remote logging: keeping STDOUT enabled");
+    } else {
+        ESP_LOGW(TAG, "Remote logging: STDOUT disabled. Logs will be sent only to the remote server once remote logging is enabled.");
+    }
+
+    // get logging host from NVS
+    char *net_log_host = NULL;
+    if (nvs_read_string(S_NAMESPACE, S_KEY_NET_LOGGING_HOST, &net_log_host) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read network logging host from NVS");
+        return ESP_FAIL;
+    }
+    // get logging port from NVS
+    uint16_t net_log_port = S_DEFAULT_NET_LOGGING_PORT;
+    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_NET_LOGGING_PORT, &net_log_port));
+    
+    // setup remote logging depending on the type
+    if (net_log_type == 1) {
+        // UDP logging
+    	ESP_ERROR_CHECK(udp_logging_init( net_log_host, net_log_port, write_to_stdout ));
+    } else if (net_log_type == 2) {
+        // TCP logging
+    	ESP_ERROR_CHECK(tcp_logging_init( net_log_host, net_log_port, write_to_stdout ));
+    } else if (net_log_type == 3) {
+        // MQTT logging
+    	ESP_LOGW(TAG, "*** to be implemented ***");
+    } else {    
+        ESP_LOGE(TAG, "Unknown remote logging type: %i", net_log_type);
+        free(net_log_host);
+        return ESP_FAIL;
+    }
+
+
+    free(net_log_host);
+    return ESP_OK;
+}
+
 /* System control routines */
 /**
  * @file settings.c

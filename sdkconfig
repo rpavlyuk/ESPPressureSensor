@@ -1053,6 +1053,31 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
+# NET Logging
+#
+# default:
+CONFIG_WRITE_TO_STDOUT=y
+# default:
+# CONFIG_NET_LOGGING_USE_RINGBUFFER is not set
+# default:
+CONFIG_ESP_WIFI_SSID="myssid"
+# default:
+CONFIG_ESP_WIFI_PASSWORD="mypassword"
+# default:
+CONFIG_ESP_MAXIMUM_RETRY=5
+# default:
+# CONFIG_ENABLE_UDP_LOG is not set
+# default:
+# CONFIG_ENABLE_TCP_LOG is not set
+# default:
+# CONFIG_ENABLE_MQTT_LOG is not set
+# default:
+# CONFIG_ENABLE_HTTP_LOG is not set
+# default:
+# CONFIG_ENABLE_SSE_SERVER_LOG is not set
+# end of NET Logging
+
+#
 # Compiler options
 #
 # default:

@@ -4,6 +4,7 @@
 #include "freertos/queue.h"      // if you use queues
 
 #include "common.h"
+#include "version.h"
 
 #include <stdio.h>
 #include "esp_log.h"
@@ -142,6 +143,26 @@ void app_main(void) {
             esp_restart();
             return;
         }
+
+#if _DEVICE_ENABLE_NET_LOGGING
+        ESP_LOGI(TAG, "Network logging module ENABLED!");
+        // setup network logging
+        ESP_ERROR_CHECK(setup_remote_logging());
+
+        // repeate welcome message with network logging enabled
+        ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
+        ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial));
+        ESP_LOGI(TAG, "*** Started ESP32-based Pressure sensor device with network logging enabled ***");
+        ESP_LOGI(TAG, "Version: %s", DEVICE_SW_VERSION);
+        ESP_LOGI(TAG, "Device ID: %s", device_id);
+        ESP_LOGI(TAG, "Device Serial: %s", device_serial);
+        ESP_LOGI(TAG, "Built with ESP-IDF version: %s", esp_get_idf_version());
+        ESP_LOGI(TAG, "Network logging is active now.");
+
+        // Free allocated memory after usage
+        free(device_id);
+        free(device_serial);
+#endif
 
 #if _DEVICE_ENABLE_WEB || _DEVICE_ENABLE_HTTP_API
         // start web server

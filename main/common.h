@@ -10,8 +10,9 @@
 #define _DEVICE_ENABLE_HTTP_API             (true && _DEVICE_ENABLE_WIFI)
 #define _DEVICE_ENABLE_WEB                  (true && _DEVICE_ENABLE_HTTP_API)
 
-#define _DEVICE_ENABLE_MQTT     (true && _DEVICE_ENABLE_WIFI)
-#define _DEVICE_ENABLE_HA       (true && _DEVICE_ENABLE_MQTT)
+#define _DEVICE_ENABLE_MQTT         (true && _DEVICE_ENABLE_WIFI)
+#define _DEVICE_ENABLE_HA           (true && _DEVICE_ENABLE_MQTT)
+#define _DEVICE_ENABLE_NET_LOGGING  (true && _DEVICE_ENABLE_WIFI)
 
 #define _DEVICE_ENABLE_ZIGBEE   false   // DO NOT ENABLE both WiFi and Zigbee and do not remove dual-enablement protection. That will make device very unstable!
 
