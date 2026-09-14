@@ -11,6 +11,9 @@
 #include "esp_debug_helpers.h"  // For esp_backtrace_print
 #include "esp_timer.h"
 
+#include "non_volatile_storage.h"
+
+#include "settings.h"
 #include "mqtt.h"
 
 static heap_trace_record_t trace_buffer[NUM_RECORDS];  // Buffer to store the trace records
@@ -109,6 +112,64 @@ void status_task(void *pvParameters) {
                 heap_trace_cycle = 0;
             }
         }
+#endif
+#if _DEVICE_ENABLE_STATUS_MEMGUARD
+        // Memory guard check
+        
+        uint16_t memguard_mode = S_DEFAULT_STATUS_MEMGUARD_MODE;
+        ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_STATUS_MEMGUARD_MODE, &memguard_mode));
+
+        if (memguard_mode == MEMGRD_MODE_DISABLED) {
+            // Disabled
+            consecutive_below_threshold_count = 0;
+            ESP_LOGI(STATUS_TAG, "Memory guard is DISABLED in settings (%u). No action taken.", memguard_mode);
+        } else {    
+            uint32_t memguard_threshold = S_DEFAULT_STATUS_MEMGUARD_THRESHOLD;
+            ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_STATUS_MEMGUARD_THRESHOLD, &memguard_threshold));
+
+            size_t current_free_heap = esp_get_free_heap_size();
+            // "Peak shaving" - take action if free heap is below threshold for certain consecutive checks
+            if (current_free_heap < memguard_threshold) {
+                consecutive_below_threshold_count++;
+                ESP_LOGW(STATUS_TAG, "Memory guard triggered! Free heap (%u bytes) is below threshold (%u bytes): %d consecutive checks below threshold of %d. Mode: %u", 
+                        current_free_heap, memguard_threshold, consecutive_below_threshold_count, MEMGUARD_CONSECUTIVE_THRESHOLD_COUNT, memguard_mode);
+                
+
+                if (memguard_mode == MEMGRD_MODE_WARN) {
+                    // Warn only, but only if threshold reached certain number of times
+                    if (consecutive_below_threshold_count == MEMGUARD_CONSECUTIVE_THRESHOLD_COUNT) {
+                        ESP_LOGW(STATUS_TAG, "Memory guard mode (%d): WARNING only. No action taken.", memguard_mode);
+                        consecutive_below_threshold_count = 0;
+                    }           
+                } else if (memguard_mode == MEMGRD_MODE_RESTART) {
+                    if (consecutive_below_threshold_count >= MEMGUARD_CONSECUTIVE_THRESHOLD_COUNT) {
+                        // We need to protect user from endless reboot loop if user set very high threshold
+                        // Let's not restart the system if uptime is less than 5 minutes
+                        if (esp_timer_get_time() < MEMGUARD_BOOT_PROTECTION_TIME_MINUTES * 60 * 1000000) {
+                            ESP_LOGI(STATUS_TAG, "Memory guard mode (%d): System uptime is less than %d minutes. Skipping restart to avoid reboot loop.", memguard_mode, MEMGUARD_BOOT_PROTECTION_TIME_MINUTES);
+                            ESP_LOGW(STATUS_TAG, "System uptime is less than %d minutes, but %d consecutive checks below threshold of %d. Skipping restart to avoid reboot loop.", MEMGUARD_BOOT_PROTECTION_TIME_MINUTES, consecutive_below_threshold_count, MEMGUARD_CONSECUTIVE_THRESHOLD_COUNT);
+                        } else {
+                            // Restart system
+                            ESP_LOGW(STATUS_TAG, "Memory guard mode (%d): RESTARTING system now (%d checks out of %d fired)!", memguard_mode, consecutive_below_threshold_count, MEMGUARD_CONSECUTIVE_THRESHOLD_COUNT);
+                            MEMGUARD_REBOOT_FUNCTION();
+                        }
+                        consecutive_below_threshold_count = 0;
+                    } else {
+                        // not yet reached required consecutive count
+                    }
+                } else {
+                    ESP_LOGI(STATUS_TAG, "Memory guard mode (%d): DISABLED or unknown mode. No action taken.", memguard_mode);
+                    // reset counter if threshold reached certain number of times
+                    if (consecutive_below_threshold_count == MEMGUARD_CONSECUTIVE_THRESHOLD_COUNT) {
+                        consecutive_below_threshold_count = 0;
+                    }
+                }
+            }  else {
+                // Reset counter if memory is above threshold
+                consecutive_below_threshold_count = 0;
+                ESP_LOGI(STATUS_TAG, "Free memory (%d) is above threshold (%d). Consecutive below threshold count reset.", current_free_heap, memguard_threshold);
+            }
+        }  
 #endif
 
 #if _DEVICE_ENABLE_STATUS_SYSINFO_HEAP_TRACE

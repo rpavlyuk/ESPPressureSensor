@@ -52,7 +52,7 @@ extern int device_ready;
 #define OTA_UPDATE_URL_LENGTH  256
 
 #define MEMGUARD_THRESHOLD_MIN        16384     // 16k
-#define MEMGUARD_THRESHOLD_MAX        131072    // 128k
+#define MEMGUARD_THRESHOLD_MAX        262144    // 256k
 
 #define MEMGRD_MODE_DISABLED    0
 #define MEMGRD_MODE_WARN        1

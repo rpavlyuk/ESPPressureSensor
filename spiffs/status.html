@@ -42,6 +42,7 @@
                 <tr><td>Sampling</td><td><span id="val_sampling_enabled"></span></td></tr>
                 
                 <tr><td><b>Device Status</b></td><td></td></tr>
+                <tr id="row_memguard_threshold" style="display: none;"><td>Memguard Threshold</td><td style="padding-left: 10px;"><span id="val_memguard_threshold"></span> bytes</td></tr>
                 <tr><td>Free Heap</td><td><span id="val_free_heap"></span> bytes</td></tr>
                 <tr><td>Minimum Free Heap</td><td><span id="val_min_free_heap"></span> bytes</td></tr>
                 <tr><td>Time Since Boot</td><td><span id="val_time_since_boot"></span></td></tr>
@@ -76,49 +77,8 @@
     <script src="https://code.jquery.com/jquery-4.0.0.min.js" integrity="sha256-OaVG6prZf4v69dPg6PhVattBXkcOWQB62pdZ3ORyrao=" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="/static/shared.js"></script>
+    <script src="/static/status.js"></script>
     <script>
-            function formatTimeSinceBoot(microseconds) {
-        let total_seconds = Math.floor(microseconds / 1000000); // Convert microseconds to seconds
-        
-        let days = Math.floor(total_seconds / (24 * 60 * 60)); // Calculate days
-        total_seconds %= (24 * 60 * 60); // Get remaining seconds after calculating days
-        
-        let hours = Math.floor(total_seconds / (60 * 60)); // Calculate hours
-        total_seconds %= (60 * 60); // Get remaining seconds after calculating hours
-        
-        let minutes = Math.floor(total_seconds / 60); // Calculate minutes
-        let seconds = total_seconds % 60; // Remaining seconds
-
-        return `${days} days ${hours} hours ${minutes} minutes ${seconds} seconds`;
-    }
-
-    function updateSensorData() {
-        $.ajax({
-            url: '/api/status',
-            type: 'GET',
-            dataType: 'json',
-            success: function(response) {
-                $('#val_pressure').text(response.sensor.pressure.toFixed(2));
-                $('#val_pressure_atm').text((response.sensor.pressure / 101325).toFixed(2));
-                $('#val_voltage').text(response.sensor.voltage.toFixed(3));
-                $('#val_voltage_offset').text(response.sensor.voltage_offset.toFixed(3));
-                $('#val_sensor_linear_multiplier').text(response.sensor.sensor_linear_multiplier);
-                $('#val_voltage_raw').text(response.sensor.voltage_raw);
-                $('#val_sampling_enabled').text(response.status.sensor_sampling_enabled == 1 ? "Enabled" : "Disabled");
-
-                $('#val_free_heap').text(response.status.free_heap);
-                $('#val_min_free_heap').text(response.status.min_free_heap);
-                // Convert time since boot to a readable format and update the element
-                let time_since_boot = formatTimeSinceBoot(response.status.time_since_boot);
-                $('#val_time_since_boot').text(time_since_boot);
-                
-            },
-            error: function() {
-                console.error("Failed to fetch sensor data");
-            }
-        });
-    }
-
     $(document).ready(function() {
         updateSensorData();
         setInterval(updateSensorData, {VAL_SENSOR_READ_INTERVAL});

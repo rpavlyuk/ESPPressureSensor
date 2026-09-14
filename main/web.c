@@ -306,6 +306,14 @@ void assign_static_page_variables(char *html_output) {
 
     snprintf(f_len, sizeof(f_len), "%i", CA_CERT_LENGTH);
     replace_placeholder(html_output, "{VAL_CA_CERT_LEN_MAX}", f_len);
+
+    snprintf(f_len, sizeof(f_len), "%i", NET_LOGGING_HOST_LENGTH);
+    replace_placeholder(html_output, "{LEN_NET_LOGGING_HOST}", f_len);
+
+    snprintf(f_len, sizeof(f_len), "%i", MEMGUARD_THRESHOLD_MIN);
+    replace_placeholder(html_output, "{MIN_MEMGUARD_THRESHOLD}", f_len);
+    snprintf(f_len, sizeof(f_len), "%i", MEMGUARD_THRESHOLD_MAX);
+    replace_placeholder(html_output, "{MAX_MEMGUARD_THRESHOLD}", f_len);
 }
 
 /**

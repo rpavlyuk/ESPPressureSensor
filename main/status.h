@@ -10,6 +10,10 @@
 #define NUM_RECORDS 100  // Number of allocations to trace
 #define BACKTRACE_DEPTH 6  // Number of stack frames to capture in backtrace
 
+#define MEMGUARD_BOOT_PROTECTION_TIME_MINUTES   3  // Minimum uptime in minutes before allowing reboot
+#define MEMGUARD_CONSECUTIVE_THRESHOLD_COUNT    3  // Number of consecutive checks below threshold before action
+#define MEMGUARD_REBOOT_FUNCTION esp_restart  // Function to call for rebooting. Options: system_reboot, esp_restart, abort or custom
+
 static const char *STATUS_TAG = "S HeapMonitor";
 
 /**
