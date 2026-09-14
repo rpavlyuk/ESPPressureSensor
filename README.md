@@ -120,6 +120,17 @@ You may consider the other IO pin so you can change `PRESSURE_SENSOR_PIN` in fil
 * System Update:
   * `OTA Update URL`: A URL pointing to `.bin` file with the firmware which you want to update the system to. See section *OTA Firmware Update* below for details. The UI client will also try to check if there's new version at the provided URL but looking for `build_info.json` file in the same directory as firmware file.
   * `OTA Update Reset Config`: Reset device configuration (except Wi-Fi) once OTA is performed. Useful when data model has been migrated.
+* Network logging parameters:
+  * `Logging Type`: what logging mechaism to use.
+    * `Disabled`: Default setting. No network logging is enabled.
+    * `UDP`, `TCP`: The device supports remote logging using the Syslog protocol (RFC 3164 / RFC 5424) over UDP or TCP (recommended). You may capture the logs using [RSyslog](https://www.rsyslog.com) or other compatible tools like [Graylog](https://graylog.org). **NOTE:** SSL/TLS encryption is not supported, so ensure safe environment when sending logs outside the secure perimeter.
+    * `MQTT`: Logging to a specified MQTT topic. *Currently not implemented*
+  * `Logging Host`: IP or hostname to send logs to. Must be within the same LAN when using UDP broadcast address.
+  * `Logging Port`: UDP/TCP port on the target host.
+  * `Keep Stdout Logging`: keep sending messages to STDOUT (console) even when network logging is enabled.
+* Memguard parameters:
+  * `Memory Guard Mode`: Either disable memguard at all OR set corresponding system reaction: warning only or full reboot.
+  * `Memory Guard Threshold (bytes)`: Free heap memory in bytes which is considered as too low, so the action must be taken. Default is 65535 (64k). Setting the threashhold too high (192k+) may put the device in endless reboot loop. However, there's a prevention machanism: `memguard` actions are only taken 3 minutes since boot, so you have time to change the threashhold or disable `memguard` at all. Use up and down arrows to adjust the number to acceptable value.
 
 ## Calibration
 1. Connect the pressure sensor to ESP32 device and leave it open. Means, do not mount it into the tank or pipe.

@@ -227,6 +227,16 @@ void run_http_server(void *param) {
         err = httpd_register_uri_handler(server, &get_ca_cert_uri);
         ESP_LOGI(TAG, "Register %s => %s", get_ca_cert_uri.uri, esp_err_to_name(err));
         h_count++;
+
+        httpd_uri_t api_control_uri = {
+            .uri      = "/api/control",
+            .method   = HTTP_POST,
+            .handler  = api_control_handler,
+            .user_ctx = NULL
+        };
+        err = httpd_register_uri_handler(server, &api_control_uri);
+        ESP_LOGI(TAG, "Register %s => %s", api_control_uri.uri, esp_err_to_name(err));
+        h_count++;
 #endif
         ESP_LOGI(TAG, "%d HTTP handlers registered. Server ready!", h_count);
     } else {
@@ -2490,6 +2500,184 @@ static esp_err_t reset_post_handler(httpd_req_t *req) {
     }
 
     return ret;
+}
+
+/**
+ * @brief Handler for /api/control endpoint. The API endpoint to control device processes.
+ *
+ * @param req HTTP request
+ * @return ESP_OK or ESP_FAIL
+ */
+
+static esp_err_t api_control_handler(httpd_req_t *req) {
+    /*
+        Request format:
+        {
+            "device_id": "<device_id>",
+            "device_serial": "<device_serial>",
+            "action": "<action_name>",
+            "params": {
+                // action-specific parameters
+            }
+        }
+    */
+    ESP_LOGI(TAG, "Processing control web request");
+
+    char content[MAX_JSON_BUFFER_SIZE];
+    // Get the POST data
+    int total_len = req->content_len;
+    int received = 0;
+    if (total_len >= sizeof(content)) {
+        ESP_LOGE(TAG, "Content size overflowing the buffer!");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    while (received < total_len) {
+        int ret = httpd_req_recv(req, content + received, total_len - received);
+        if (ret <= 0) {
+            ESP_LOGE(TAG, "Unexpected error while reading from request: %i", ret);
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
+        received += ret;
+    }
+    content[received] = '\0';
+
+    // Log request content
+    ESP_LOGI(TAG, "Received control request: %s", content);
+
+    // Parse the incoming JSON data
+    cJSON *json_request = cJSON_Parse(content);
+    if (json_request == NULL) {
+        ESP_LOGE(TAG, "Control request: Failed to parse JSON request");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON format");
+        return ESP_FAIL;
+    }
+
+    // 1) validate device identity via query args
+    if (validate_device_identity_from_json(json_request) != ESP_OK) {
+        // validate_device_identity_from_json already sent HTTP error response
+        return ESP_FAIL;
+    }
+
+    // 2) get action code from query params
+    // 0 - no action
+    // 1 - restart the device
+    // 2 - restart RTOS service / process
+    cJSON *action_item = cJSON_GetObjectItem(json_request, "action");
+    if (action_item == NULL || !cJSON_IsNumber(action_item)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid action");
+        return ESP_FAIL;
+    }
+    const int action = action_item->valueint;
+
+    // process action
+    switch (action) {
+        case 0:
+            ESP_LOGI(TAG, "No action requested in control request");
+            // can be used as a simple ping to check if the device is alive and responding
+            cJSON *response = cJSON_CreateObject();
+            cJSON_AddNumberToObject(response, "status", 0); // success
+            cJSON_AddStringToObject(response, "message", "NOOP");
+            char *out = cJSON_PrintUnformatted(response);
+            cJSON_Delete(response);
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+            free(out);
+            break;
+        case 1: // restart device
+            ESP_LOGI(TAG, "Restarting device as per control request");
+            // get params.mode
+            // 0 - standard reboot using ESPRelayBoard system_reboot()
+            // 1 - call esp_restart() directly
+            // 2 - deep kill with abort()
+            cJSON *params = cJSON_GetObjectItem(json_request, "params");
+            int mode = 0; // default mode
+            if (params != NULL) {
+                cJSON *mode_item = cJSON_GetObjectItem(params, "mode");
+                if (mode_item != NULL && cJSON_IsNumber(mode_item)) {
+                    mode = mode_item->valueint;
+                } else {
+                    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid or missing 'mode' parameter");
+                    return ESP_FAIL;
+                }
+                // process mode
+                switch (mode) {
+                    case 0:
+                        ESP_LOGI(TAG, "Control request: standard reboot");
+                        if (system_reboot() == ESP_OK)
+                        // send simple JSON response before rebooting
+                        {
+                            cJSON *response = cJSON_CreateObject();
+                            cJSON_AddNumberToObject(response, "status", 0); // success
+                            cJSON_AddStringToObject(response, "message", "Rebooting device");   
+                            char *out = cJSON_PrintUnformatted(response);
+                            cJSON_Delete(response);
+                            httpd_resp_set_type(req, "application/json");
+                            httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+                            free(out);
+                        } else {
+                            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to initiate reboot");
+                            return ESP_FAIL;
+                        }
+                        break;
+                    case 1:
+                        ESP_LOGI(TAG, "Control request: esp_restart()");
+                        esp_restart();
+                        // there's nothing to return here as esp_restart() does not return and reboots immediately
+                        break;
+                    case 2:
+                        ESP_LOGD(TAG, "Control request: deep kill with abort()");
+                        // last resort: hard reboot with panic
+                        abort();
+                        // there's nothing to return here as abort() does not return and crashes the system instantly
+                        break;
+                    default:
+                        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown reboot mode");
+                        return ESP_FAIL;
+                }
+            } else {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'params' object required for action");
+                return ESP_FAIL;
+            }
+
+            return reboot_handler(req);
+        case 2: // restart RTOS service / process
+            ESP_LOGI(TAG, "Restarting RTOS service as per control request");
+            // implement service restart logic here in future, but return status 1 (not implemented) and corresponding message for now
+            {
+                cJSON *response = cJSON_CreateObject();
+                cJSON_AddNumberToObject(response, "status", 1); // not implemented
+                cJSON_AddStringToObject(response, "message", "Service restart not implemented yet");   
+                char *out = cJSON_PrintUnformatted(response);
+                cJSON_Delete(response);
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_set_status(req, "400 Bad Request");
+                httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+                free(out);
+            }    
+            break;
+        default:
+            // send error response in JSON format for consistency
+            {
+                char buffer[64];
+                sprintf(buffer, "Unknown action code: %d", action);
+                cJSON *response = cJSON_CreateObject();
+                cJSON_AddNumberToObject(response, "status", 2); // unknown action
+                cJSON_AddStringToObject(response, "message", buffer);   
+                char *out = cJSON_PrintUnformatted(response);
+                cJSON_Delete(response);
+                httpd_resp_set_type(req, "application/json");
+                // set error 400 status to response
+                httpd_resp_set_status(req, "400 Bad Request");
+                httpd_resp_send(req, out, HTTPD_RESP_USE_STRLEN);
+                free(out);
+            }
+            return ESP_FAIL;
+    }
+
+    // Handle API control requests here
+    return ESP_OK;
 }
 
 /** HTTP Server control routines */

@@ -39,6 +39,7 @@ static esp_err_t set_setting_value_post_handler(httpd_req_t *req);
 static esp_err_t get_settings_all_handler(httpd_req_t *req);
 static esp_err_t get_setting_one_handler(httpd_req_t *req);
 static esp_err_t get_ca_certificate_handler(httpd_req_t *req);
+static esp_err_t api_control_handler(httpd_req_t *req);
 
 void assign_static_page_variables(char *html_output);
 void replace_placeholder(char *html_output, const char *placeholder, const char *value);

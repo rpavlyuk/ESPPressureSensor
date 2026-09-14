@@ -157,7 +157,12 @@
             <td>
               <!-- Reboot button -->
               <form action="/reboot" method="POST">
-                <input type="submit" value="Reboot Device">
+                <select name="reboot_mode" id="reboot_type">
+                  <option value="0" selected><b>Gentle:</b> Using software reboot</option>
+                  <option value="1"><b>Moderate:</b> Using esp_restart()</option>
+                  <option value="2"><b>Hard:</b> Using abort()</option>
+                </select>
+                <input type="submit" value="Reboot Device" id="rebootBtn" name="rebootBtn" class="btn btn-primary btn-sm">
               </form>
             </td>
             <td>

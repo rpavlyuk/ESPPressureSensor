@@ -399,8 +399,124 @@ $(function () {
     });
   }
 
+  function bindAjaxReboot() {
+    const $form = $('form[action="/reboot"]');
+    if (!$form.length) return;
+
+    $form.on("submit", function (e) {
+      e.preventDefault();
+
+      const formData = collectFormData($form);
+
+      showSaveMsg("Sending device to reboot using mode " + formData.reboot_mode + "...", false);
+
+      const cfg = window.PressureSensorConfig || {};
+      const deviceId = cfg.deviceId || "";
+      const deviceSerial = cfg.deviceSerial || "";
+
+      /*
+        Request format:
+        {
+            "device_id": "<device_id>",
+            "device_serial": "<device_serial>",
+            "action": 1,  // 1 = reboot
+            "params": {
+                "mode": 0  // 0=gentle, 1=moderate, 2=hard
+            }
+        }
+      */
+     /*
+       Response format:
+       {
+        "status": 0, // 0=success, 1=error, 2,3,...=other error codes
+        "message": "Rebooting device"
+       }
+     */
+      const payload = {
+        device_id: deviceId,
+        device_serial: deviceSerial,
+        action: 1, // reboot
+        params: {
+          mode: formData.reboot_mode || 0
+        }
+      };
+
+      $.ajax({
+        url: "/api/control",
+        type: "POST",
+        contentType: "application/json",
+        dataType: "json",
+        data: JSON.stringify(payload),
+        timeout: 10000
+      })
+      .done(function (resp) {
+        const st = (resp && typeof resp.status === "number") ? resp.status : 1;
+        const msg = (resp && resp.message) ? resp.message : (st === 0 ? "Reboot command sent" : "Failed to send reboot command");
+
+        if (st === 0) {
+          showSaveMsg(msg, false);
+          alert("Device is rebooting. Please wait a few seconds until the page reloads or refresh the page manually after 20-30 seconds.");
+        } else {
+          showSaveMsg("ERROR: " + msg, true);
+        }
+      })
+      .fail(function (xhr, status) {
+        showSaveMsg("ERROR: Reboot request failed (" + status + ")", true);
+      });
+
+      // Since some reboot modes do not return status code, keep sending requests to /api/control anyway with the content:
+      // { "device_id": "<device_id>", "device_serial": "<device_serial>", "action": 0 }
+      // until you get a response 
+      // {
+      //   "status": 0, 
+      //   "message": "NOOP"
+      // } 
+      // (or timeout) to confirm the device is back online.
+      // And then reload the page to see the new settings.
+
+      // Start a simple polling loop to check when the device is back online
+      const pollInterval = 3000; // 3 seconds
+      let pollCount = 0;
+      const maxPolls = 10; // total 30 seconds
+
+      const pollTimer = setInterval(function () {
+        pollCount++;
+        $.ajax({
+          url: "/api/control",
+          type: "POST",
+          contentType: "application/json",
+          dataType: "json",
+          data: JSON.stringify({
+            device_id: deviceId,
+            device_serial: deviceSerial,
+            action: 0 // NOOP
+          }),
+          timeout: 5000
+        })
+        .done(function (resp) {
+          const st = (resp && typeof resp.status === "number") ? resp.status : 1;
+          if (st === 0) {
+            clearInterval(pollTimer);
+            showSaveMsg("Device is back online. Reloading page...", false);
+            location.reload();
+          }
+        })
+        .fail(function () {
+          // ignore failures; device may still be rebooting
+        });
+
+        if (pollCount >= maxPolls) {
+          clearInterval(pollTimer);
+          showSaveMsg("Device did not respond after reboot. Please refresh the page manually.", true);
+        }
+      }, pollInterval);
+    });
+  }
+
+
   $(function () {
     bindAjaxSave();
+    bindAjaxReboot();
   });
 
 })();
