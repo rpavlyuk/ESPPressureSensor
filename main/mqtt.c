@@ -788,6 +788,8 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
         is_error = true;
     }
     ha_entity_discovery_free(entity_discovery);
+    free(entity_discovery);
+    entity_discovery = NULL;
 
 
     if (is_error) {
