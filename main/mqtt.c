@@ -103,25 +103,42 @@ void mqtt_event_task(void *arg) {
  *      - ESP_FAIL if the event cannot be sent to the queue
  */
 esp_err_t trigger_mqtt_publish(const sensor_data_t *sensor_data) {
+    if (sensor_data == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    // check if MQTT connection is enabled at all
-    uint16_t mqtt_connection_mode;
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode));
+    uint16_t mqtt_connection_mode = 0;
+    esp_err_t err = nvs_read_uint16(
+        S_NAMESPACE, S_KEY_MQTT_CONNECT, &mqtt_connection_mode);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MQTT settings: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
     if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
-        ESP_LOGW(TAG, "MQTT is disabled in settings. Skipping MQTT publish.");
+        ESP_LOGD(TAG, "MQTT is disabled. Skipping publish.");
         return ESP_FAIL;
     }
 
-    // proceed only if MQTT is enabled
-    sensor_event_t event;
+    if (mqtt_event_queue == NULL) {
+        ESP_LOGE(TAG, "MQTT event queue is not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    sensor_event_t event = {0};
     event.sensor_data = *sensor_data;
-    ESP_LOGI(TAG, "%s: +-> Pushing MQTT publish event to the queue. Sensor data: %.2f Pa", __func__, event.sensor_data.pressure);
+    // Any additional fields in event can be set here if needed
 
-    // Send the event to the MQTT event task
-    if (xQueueSend(mqtt_event_queue, &event, portMAX_DELAY) != pdTRUE) {
-        ESP_LOGE(TAG, "Failed to send event to MQTT queue");
-        return ESP_FAIL;
+    if (xQueueSend(mqtt_event_queue, &event,
+                   pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "MQTT queue full; skipping this publication");
+        return ESP_ERR_TIMEOUT;
     }
+
+    ESP_LOGD(TAG, "Queued sensor reading: %.2f Pa",
+             event.sensor_data.pressure);
 
     return ESP_OK;
 }

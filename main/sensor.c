@@ -11,6 +11,7 @@
 #include <math.h>
 
 #include "common.h"
+#include "util.h"
 #include "flags.h"
 #include "sensor.h"
 #include "settings.h"
@@ -18,464 +19,463 @@
 #include "zigbee.h"
 #include "non_volatile_storage.h"
 
-sensor_data_t sensor_data;
+sensor_data_t s_sensor_data;
+
+static portMUX_TYPE s_data_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_running;
+static bool s_stop_requested;
 
 
 /**
  * @brief: Create a copy of global sensor_data variable
  */
 sensor_data_t get_sensor_data() {
-    sensor_data_t s_data = {
-        .pressure = sensor_data.pressure,
-        .sensor_linear_multiplier = sensor_data.sensor_linear_multiplier,
-        .voltage = sensor_data.voltage,
-        .voltage_offset = sensor_data.voltage_offset,
-        .voltage_raw = sensor_data.voltage_raw,
-    };
-
-    return s_data;
+    sensor_data_t copy;
+    portENTER_CRITICAL(&s_data_lock);
+    copy = s_sensor_data;
+    portEXIT_CRITICAL(&s_data_lock);
+    return copy;
 }
-/*---------------------------------------------------------------
-        ADC Calibration
----------------------------------------------------------------*/
+
+/**
+ * @brief Stores the provided sensor data into the global sensor_data variable.
+ * @param data Pointer to the sensor data to store.
+ */
+static void store_sensor_data(const sensor_data_t *data) {
+    portENTER_CRITICAL(&s_data_lock);
+    s_sensor_data = *data;
+    portEXIT_CRITICAL(&s_data_lock);
+}
+
+/**
+ * @brief Request the sensor task to stop.
+ *
+ * @note This function sets a flag indicating that the sensor task should stop.
+ *       The actual stopping of the task should be handled within the task itself.
+ */
+void sensor_request_stop(void) {
+    portENTER_CRITICAL(&s_data_lock);
+    if (s_running) s_stop_requested = true;
+    portEXIT_CRITICAL(&s_data_lock);
+}
+
+/**
+ * @brief Checks if a stop has been requested for the sensor task.
+ * @return true if a stop has been requested, false otherwise.
+ */
+static bool stop_requested(void) {
+    bool stop;
+    portENTER_CRITICAL(&s_data_lock);
+    stop = s_stop_requested;
+    portEXIT_CRITICAL(&s_data_lock);
+    return stop;
+}
+
+/**
+ * @brief Initializes the ADC calibration handle for the specified ADC unit and channel.
+ * @param unit The ADC unit to initialize the calibration for.
+ * @param channel The ADC channel to initialize the calibration for.
+ * @param atten The ADC attenuation setting.
+ * @param out_handle Pointer to the variable that will receive the initialized ADC calibration handle.
+ * @return true if the calibration handle was successfully initialized, false otherwise.
+ * @note The caller is responsible for providing a valid pointer for out_handle.
+ * @see sensor_adc_calibration_deinit
+ */
 bool sensor_adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle)
 {
+    if (out_handle == NULL) return false;
+    *out_handle = NULL;
     adc_cali_handle_t handle = NULL;
-    esp_err_t ret = ESP_FAIL;
-    bool calibrated = false;
-
+    esp_err_t err;
+    /* Select the same scheme in init and deinit. No ambiguous cross-scheme fallback. */
 #if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
-    if (!calibrated) {
-        ESP_LOGI(TAG, "calibration scheme version is %s", "Curve Fitting");
-        adc_cali_curve_fitting_config_t cali_config = {
-            .unit_id = unit,
-            .chan = channel,
-            .atten = atten,
-            .bitwidth = ADC_BITWIDTH_DEFAULT,
-        };
-        ret = adc_cali_create_scheme_curve_fitting(&cali_config, &handle);
-        if (ret == ESP_OK) {
-            calibrated = true;
-        }
-    }
-#endif
-
-#if ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
-    if (!calibrated) {
-        ESP_LOGI(TAG, "calibration scheme version is %s", "Line Fitting");
-        adc_cali_line_fitting_config_t cali_config = {
-            .unit_id = unit,
-            .atten = atten,
-            .bitwidth = ADC_BITWIDTH_DEFAULT,
-        };
-        ret = adc_cali_create_scheme_line_fitting(&cali_config, &handle);
-        if (ret == ESP_OK) {
-            calibrated = true;
-        }
-    }
-#endif
-
-    *out_handle = handle;
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Calibration Success");
-    } else if (ret == ESP_ERR_NOT_SUPPORTED || !calibrated) {
-        ESP_LOGW(TAG, "eFuse not burnt, skip software calibration");
-    } else {
-        ESP_LOGE(TAG, "Invalid arg or no memory");
-    }
-
-    return calibrated;
-}
-
-
-void sensor_adc_calibration_deinit(adc_cali_handle_t handle)
-{
-#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
-    ESP_LOGI(TAG, "deregister %s calibration scheme", "Curve Fitting");
-    ESP_ERROR_CHECK(adc_cali_delete_scheme_curve_fitting(handle));
-
-#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
-    ESP_LOGI(TAG, "deregister %s calibration scheme", "Line Fitting");
-    ESP_ERROR_CHECK(adc_cali_delete_scheme_line_fitting(handle));
-#endif
-}
-
-
-void sensor_run(void *pvParameters) {
-
-    // wait for the device to become ready
-        // Wait up to 30 seconds total
-    int wait_time_ms = 30000;
-    EventBits_t bits = xEventGroupWaitBits(
-        g_sys_events,             // event group handle
-        BIT_DEVICE_READY,       // bit(s) to wait for
-        pdFALSE,                  // don't clear the bit on exit
-        pdTRUE,                   // wait for all bits (only one here)
-        pdMS_TO_TICKS(wait_time_ms)      // timeout 30 seconds
-    );
-
-    if ((bits & BIT_DEVICE_READY)) {
-        ESP_LOGI(TAG, "%s: Device is ready!", __func__);
-        // Continue normal operation
-    } else {
-        ESP_LOGE(TAG, "%s: Device never became ready after %d seconds", __func__, wait_time_ms/1000);
-#if REBOOT_ON_SENSOR_FAILURE
-        ESP_LOGE(TAG, "%s: Rebooting device due to sensor initialization failure", __func__);
-        esp_restart();
-#else
-        ESP_LOGE(TAG, "%s: Sensor initialization failed. Halting sensor task.", __func__);
-        vTaskDelete(NULL); // Delete the current task to halt execution of the sensor task
-        return;
-#endif
-    }
-    
-
-    // Initialize ADC for the pressure sensor
-    //-------------ADC1 Init---------------//
-    adc_oneshot_unit_handle_t adc1_handle;
-    adc_oneshot_unit_init_cfg_t init_config1 = {
-        .unit_id = ADC_UNIT_1,
-        .ulp_mode = ADC_ULP_MODE_DISABLE,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
-
-    //-------------ADC1 Config---------------//
-    adc_oneshot_chan_cfg_t adc_config = {
-        .atten = ADC_ATTEN,
+    adc_cali_curve_fitting_config_t config = {
+        .unit_id = unit, .chan = channel, .atten = atten,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, PRESSURE_SENSOR_PIN, &adc_config));
-
-
-    //-------------ADC1 Calibration Init---------------//
-    adc_cali_handle_t adc1_cali_pressure_sensor_handle = NULL;
-    bool do_calibration1_pressure_sensor = sensor_adc_calibration_init(ADC_UNIT_1, PRESSURE_SENSOR_PIN, ADC_ATTEN, &adc1_cali_pressure_sensor_handle);
-    
-
-    ESP_LOGI(TAG, "Preparing sensor data structure");
-    sensor_data.pressure = 0;
-
-    ESP_LOGI(TAG, "Starting pressure sensing cycle");
-
-    while (1) {
-        // Get sampling enabled flag from NVS
-        uint16_t sensor_smp_en = S_DEFAULT_SENSOR_SAMPLING_ENABLE;
-        ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sensor_smp_en));
-
-        // Read the raw sensor value from ADC
-        if (sensor_smp_en) {
-            ESP_LOGI(TAG, "Sensor sampling is enabled. Performing smart sampling.");
-            sensor_data.voltage_raw = perform_smart_sampling(adc1_cali_pressure_sensor_handle, adc1_handle, PRESSURE_SENSOR_PIN, do_calibration1_pressure_sensor);
-            // Obtain the voltage in Volts
-            sensor_data.voltage = sensor_data.voltage_raw / 1000.0;
-        } else {
-            ESP_LOGI(TAG, "Sensor sampling is disabled. Performing single ADC read.");
-
-            int adc_raw;
-            int voltage_mv;
-
-            ESP_ERROR_CHECK(adc_oneshot_read(
-                adc1_handle,
-                PRESSURE_SENSOR_PIN,
-                &adc_raw
-            ));
-
-            sensor_data.voltage_raw = adc_raw;
-
-            if (do_calibration1_pressure_sensor) {
-                ESP_ERROR_CHECK(adc_cali_raw_to_voltage(
-                    adc1_cali_pressure_sensor_handle,
-                    adc_raw,
-                    &voltage_mv
-                ));
-
-                sensor_data.voltage = voltage_mv / 1000.0;  // Convert mV to V
-            } else {
-                ESP_LOGE(TAG, "Cannot convert ADC raw value to voltage: calibration unavailable");
-                continue;
-            }
-        }
-        
-
-        // Calculate pressure in KPa using the provided formula
-        ESP_ERROR_CHECK(nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_data.voltage_offset));
-        ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, &sensor_data.sensor_linear_multiplier));
-        sensor_data.pressure = (sensor_data.voltage - sensor_data.voltage_offset) * sensor_data.sensor_linear_multiplier;  // Convert voltage to pressure in Pa
-
-        // Print voltage and pressure to Serial Monitor
-        ESP_LOGI(TAG, "Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.2f Pa", 
-                 sensor_data.voltage_raw, sensor_data.voltage, sensor_data.pressure);
-
-        // Publish the sensor data via MQTT if it is ready
-        bits = xEventGroupWaitBits(
-            g_sys_events,             // event group handle
-            BIT_WIFI_CONNECTED,       // bit(s) to wait for
-            pdFALSE,                  // don't clear the bit on exit
-            pdTRUE,                   // wait for all bits (only one here)
-            pdMS_TO_TICKS(wait_time_ms)      // timeout 30 seconds
-        );
-        if (bits & BIT_WIFI_CONNECTED) {
-            ESP_LOGI(TAG, "Wi-Fi is connected and provisioned. Proceeding to publish sensor data.");
-            if (trigger_mqtt_publish(&sensor_data) != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to trigger MQTT publish");
-            }
-        } else {
-            ESP_LOGW(TAG, "Wi-Fi is not ready. Skipping MQTT publish for this cycle.");
-        }
-
-        uint16_t sensor_intervl = S_DEFAULT_SENSOR_READ_INTERVAL;
-        ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &sensor_intervl));
-        ESP_LOGI(TAG, "Next pressure measurement cycle will start in %i seconds", (int) sensor_intervl / 1000);
-        vTaskDelay(pdMS_TO_TICKS(sensor_intervl));
+    err = adc_cali_create_scheme_curve_fitting(&config, &handle);
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    (void)channel;
+    adc_cali_line_fitting_config_t config = {
+        .unit_id = unit, .atten = atten, .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    err = adc_cali_create_scheme_line_fitting(&config, &handle);
+#else
+    (void)unit;
+    (void)channel;
+    (void)atten;
+    err = ESP_ERR_NOT_SUPPORTED;
+#endif
+    if (err == ESP_OK && handle != NULL) {
+        *out_handle = handle;
+        ESP_LOGI(TAG, "ADC calibration initialized");
+        return true;
     }
-
-    //Tear Down
-    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
-    if (do_calibration1_pressure_sensor) {
-        sensor_adc_calibration_deinit(adc1_cali_pressure_sensor_handle);
-    }
-}
-
-// Function to calculate the median of an array
-int calculate_median(int* data, int size) {
-    // Sort the data array
-    for (int i = 0; i < size - 1; i++) {
-        for (int j = i + 1; j < size; j++) {
-            if (data[i] > data[j]) {
-                int temp = data[i];
-                data[i] = data[j];
-                data[j] = temp;
-            }
-        }
-    }
-
-    // Calculate the median
-    if (size % 2 == 0) {
-        return (data[size / 2 - 1] + data[size / 2]) / 2;
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGW(TAG, "ADC calibration is not supported by this configuration/device");
     } else {
-        return data[size / 2];
+        ESP_LOGE(TAG, "ADC calibration failed: %s (handle=%p)",
+                 esp_err_to_name(err), (void *)handle);
     }
+    return false;
 }
 
-// Function to perform smart sampling and calculate average voltage
-float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_unit_handle_t adc1_handle, adc_channel_t channel, bool do_calibration1_pressure_sensor) {
-    int adc_raw;
-    int voltage_mv;
-    float average_voltage = 0.0;
-    uint16_t sensor_samples = (uint16_t) S_DEFAULT_SENSOR_SAMPLING_COUNT;
-    uint16_t sensor_smp_int = (uint16_t) S_DEFAULT_SENSOR_SAMPLING_INTERVAL;
-    uint16_t sensor_deviate = (uint16_t) S_DEFAULT_SENSOR_SAMPLING_MEDIAN_DEVIATION;
+/**
+ * @brief Deinitializes the ADC calibration handle.
+ * @param handle The ADC calibration handle to deinitialize.
+ * 
+ * @note This function should be called to clean up the calibration handle when it is no longer needed.
+ * @see sensor_adc_calibration_init
+ * @see sensor_adc_calibration_deinit
+ */
+void sensor_adc_calibration_deinit(adc_cali_handle_t handle)
+{
+    if (handle == NULL) return;
+    esp_err_t err;
+#if ADC_CALI_SCHEME_CURVE_FITTING_SUPPORTED
+    err = adc_cali_delete_scheme_curve_fitting(handle);
+#elif ADC_CALI_SCHEME_LINE_FITTING_SUPPORTED
+    err = adc_cali_delete_scheme_line_fitting(handle);
+#else
+    err = ESP_ERR_NOT_SUPPORTED;
+#endif
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ADC calibration cleanup failed: %s", esp_err_to_name(err));
+    }
+}
+/**
+ * @brief Entry point for the sensor task.
+ * 
+ * This function initializes the ADC and calibration handles, waits for the device to become ready,
+ * and then enters the main sensor reading and publishing loop.
+ * 
+ * @param pvParameters Task parameters (unused).
+ */
+void sensor_run(void *pvParameters)
+{
+    // Task entry point for the sensor reading and publishing loop
+    (void)pvParameters;
+    portENTER_CRITICAL(&s_data_lock);
+    bool already_running = s_running;
+    if (!already_running) { s_running = true; s_stop_requested = false; }
+    portEXIT_CRITICAL(&s_data_lock);
+    if (already_running) {
+        ESP_LOGE(TAG, "Sensor task already running");
+        vTaskDelete(NULL);
+        return;
+    }
 
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &sensor_samples));
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &sensor_smp_int));
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &sensor_deviate));
+    // Initialize ADC and calibration handles
+    adc_oneshot_unit_handle_t adc = NULL;
+    adc_cali_handle_t calibration = NULL;
+    int *samples = NULL;
+    bool startup_failed = false;
+    const size_t capacity = SENSOR_SAMPLING_COUNT_MAX;
+    const TickType_t readiness_wait = pdMS_TO_TICKS(SENSOR_WAIT_READY_MS);
+    esp_err_t err = ESP_OK;
 
-    if (sensor_samples == 0 || sensor_samples > SENSOR_SAMPLING_COUNT_MAX) {
-        ESP_LOGE(TAG, "Invalid sampling count: %u", sensor_samples);
+    ESP_LOGI(TAG, "Waiting for device to become ready (timeout: %d s)", SENSOR_WAIT_READY_MS / 1000);
+    if (g_sys_events == NULL) {
+        ESP_LOGE(TAG, "System event group unavailable");
+        startup_failed = true;
+        goto cleanup;
+    }
+    EventBits_t bits = xEventGroupWaitBits(g_sys_events, BIT_DEVICE_READY,
+                                         pdFALSE, pdTRUE, readiness_wait);
+    if (stop_requested()) goto cleanup;
+    if (!(bits & BIT_DEVICE_READY)) {
+        ESP_LOGE(TAG, "Device did not become ready within %d seconds", SENSOR_WAIT_READY_MS / 1000);
+        startup_failed = true;
+        goto cleanup;
+    } else {
+        ESP_LOGI(TAG, "Sensor device is ready");
+    }
+
+    // Initialize ADC and calibration for the sensor
+    ESP_LOGI(TAG, "Initializing ADC and calibration for the sensor");
+    adc_oneshot_unit_init_cfg_t unit_config = {
+        .unit_id = ADC_UNIT_1, .ulp_mode = ADC_ULP_MODE_DISABLE,
+    };
+    err = adc_oneshot_new_unit(&unit_config, &adc);
+    if (err != ESP_OK) { startup_failed = true; goto cleanup; }
+    adc_oneshot_chan_cfg_t channel_config = {
+        .atten = ADC_ATTEN, .bitwidth = ADC_BITWIDTH_DEFAULT,
+    };
+    err = adc_oneshot_config_channel(adc, PRESSURE_SENSOR_PIN, &channel_config);
+    if (err != ESP_OK) { startup_failed = true; goto cleanup; }
+    if (!sensor_adc_calibration_init(ADC_UNIT_1, PRESSURE_SENSOR_PIN,
+                                     ADC_ATTEN, &calibration)) {
+        startup_failed = true;
+        goto cleanup;
+    }
+    sensor_data_t initial = {0};
+    store_sensor_data(&initial);
+
+    while (!stop_requested()) {
+        uint16_t interval = S_DEFAULT_SENSOR_READ_INTERVAL;
+        err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_READ_INTERVAL, &interval);
+        if (err != ESP_OK || interval == 0) {
+            ESP_LOGW(TAG, "Invalid/unavailable measurement interval; using %d ms", S_DEFAULT_SENSOR_READ_INTERVAL);
+            interval = S_DEFAULT_SENSOR_READ_INTERVAL;
+        }
+        sensor_data_t next = {0};
+        uint16_t sampling = S_DEFAULT_SENSOR_SAMPLING_ENABLE;
+        err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sampling);
+        if (err != ESP_OK) goto cycle_done;
+
+        // Read voltage from the sensor and perform sampling if enabled
+        if (sampling) {
+            /* Allocate at most once per task lifetime; reuse across every cycle. */
+            if (samples == NULL) {
+                if (capacity == 0 || capacity > SIZE_MAX / sizeof(*samples)) {
+                    err = ESP_ERR_INVALID_SIZE;
+                    goto cycle_done;
+                }
+                samples = malloc(capacity * sizeof(*samples));
+                if (samples == NULL) { err = ESP_ERR_NO_MEM; goto cycle_done; }
+            }
+            float mv = sample_voltage(calibration, adc, PRESSURE_SENSOR_PIN,
+                                      samples, capacity, &next.voltage_raw, true);
+            if (!isfinite(mv)) { err = ESP_FAIL; goto cycle_done; }
+            next.voltage = mv / 1000.0f;
+        } else {
+            int mv = 0;
+            err = adc_oneshot_read(adc, PRESSURE_SENSOR_PIN, &next.voltage_raw);
+            if (err == ESP_OK)
+                err = adc_cali_raw_to_voltage(calibration, next.voltage_raw, &mv);
+            if (err != ESP_OK) goto cycle_done;
+            next.voltage = mv / 1000.0f;
+        }
+
+        // Convert voltage to pressure using the offset and multiplier from NVS
+        err = nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &next.voltage_offset);
+        if (err == ESP_OK)
+            err = nvs_read_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER,
+                                  &next.sensor_linear_multiplier);
+        if (err != ESP_OK) goto cycle_done;
+        next.pressure = (next.voltage - next.voltage_offset) * next.sensor_linear_multiplier;
+        if (!isfinite(next.voltage_offset) || !isfinite(next.pressure)) {
+            err = ESP_ERR_INVALID_ARG;
+            goto cycle_done;
+        }
+        if (stop_requested()) break;
+        store_sensor_data(&next);
+        ESP_LOGI(TAG, "ADC counts: %d, Voltage: %.4f V, Pressure: %.2f Pa",
+                 next.voltage_raw, next.voltage, next.pressure);
+        bits = xEventGroupWaitBits(g_sys_events, BIT_WIFI_CONNECTED,
+                                  pdFALSE, pdTRUE, readiness_wait);
+        if (stop_requested()) break;
+
+        // Wait for Wi-Fi connection before attempting to publish sensor data
+        if (bits & BIT_WIFI_CONNECTED) {
+            /* REQUIRED integration: trigger must copy *next before returning.
+             * See INTEGRATION.md. Never queue this pointer itself. */
+            err = trigger_mqtt_publish(&next);
+        }
+cycle_done:
+        if (err != ESP_OK && !stop_requested()) {
+            ESP_LOGW(TAG, "Sensor cycle skipped/failed: %s", esp_err_to_name(err));
+        }
+        if (!stop_requested()) vTaskDelay(nonzero_ticks(interval));
+    }
+
+cleanup:
+    if (err != ESP_OK) ESP_LOGE(TAG, "Sensor task error: %s", esp_err_to_name(err));
+    free(samples);
+    sensor_adc_calibration_deinit(calibration);
+    if (adc != NULL) {
+        esp_err_t cleanup_err = adc_oneshot_del_unit(adc);
+        if (cleanup_err != ESP_OK)
+            ESP_LOGE(TAG, "ADC cleanup failed: %s", esp_err_to_name(cleanup_err));
+    }
+    portENTER_CRITICAL(&s_data_lock);
+    s_running = false;
+    s_stop_requested = false;
+    portEXIT_CRITICAL(&s_data_lock);
+#if REBOOT_ON_SENSOR_FAILURE
+    if (startup_failed) esp_restart();
+#else
+    (void)startup_failed;
+#endif
+    vTaskDelete(NULL);
+}
+
+/**
+ * @brief Cleans up the ADC and calibration handles.
+ * This function deinitializes the ADC calibration handle and the ADC unit handle, freeing any associated resources. It should be called when the sensor task is stopping or when the ADC is no longer needed.
+ * @param calibration The ADC calibration handle to deinitialize.
+ * @param adc The ADC unit handle to deinitialize.
+ * 
+ * @note This function should be called before freeing the ADC and calibration handles to ensure proper cleanup.
+ * @see adc_oneshot_del_unit
+ * @see sensor_adc_calibration_deinit
+ */
+static float sample_voltage(adc_cali_handle_t calibration,
+                            adc_oneshot_unit_handle_t adc, adc_channel_t channel,
+                            int *samples, size_t capacity, int *raw_mean,
+                            bool cancellable)
+{
+    if (calibration == NULL || adc == NULL || samples == NULL) return NAN;
+    uint16_t count = S_DEFAULT_SENSOR_SAMPLING_COUNT;
+    uint16_t interval = S_DEFAULT_SENSOR_SAMPLING_INTERVAL;
+    uint16_t deviation = S_DEFAULT_SENSOR_SAMPLING_MEDIAN_DEVIATION;
+    esp_err_t err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_COUNT, &count);
+    if (err == ESP_OK)
+        err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_INTERVAL, &interval);
+    if (err == ESP_OK)
+        err = nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_MEDIAN_DEVIATION, &deviation);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Sampling settings unavailable: %s", esp_err_to_name(err));
+        return NAN;
+    }
+    if (count == 0 || count > SENSOR_SAMPLING_COUNT_MAX || count > capacity) {
+        ESP_LOGE(TAG, "Invalid sampling count: %u", (unsigned)count);
         return NAN;
     }
 
-    int samples[sensor_samples];
-    float filtered_samples[sensor_samples];
-    int num_filtered_samples = 0;
-
-    // Collect NUM_SAMPLES samples every SAMPLE_INTERVAL_MS
-    for (int i = 0; i < sensor_samples; i++) {
-        ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, channel, &adc_raw));
-        if (do_calibration1_pressure_sensor) {
-            ESP_ERROR_CHECK(adc_cali_raw_to_voltage(adc1_cali_handle, adc_raw, &voltage_mv));
+    int64_t raw_sum = 0;
+    for (int i = 0; i < count; ++i) {
+        if (cancellable && stop_requested()) return NAN;
+        int raw = 0;
+        int mv = 0;
+        err = adc_oneshot_read(adc, channel, &raw);
+        if (err == ESP_OK) err = adc_cali_raw_to_voltage(calibration, raw, &mv);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "ADC sample failed: %s", esp_err_to_name(err));
+            return NAN;
         }
-        samples[i] = voltage_mv;
-        vTaskDelay(pdMS_TO_TICKS(sensor_smp_int));
+        raw_sum += raw;
+        samples[i] = mv;
+        vTaskDelay(nonzero_ticks(interval));
     }
-
-    // Calculate the median of the collected samples
-    int median = calculate_median(samples, (int)sensor_samples);
-
-    // Filter samples that differ from the median by more than the threshold percentage
-    num_filtered_samples = 0;
-    for (int i = 0; i < (int)sensor_samples; i++) {
-        float deviation = fabs((float)(samples[i] - median) / median * 100);
-        if (deviation <= sensor_deviate &&
-            num_filtered_samples < sensor_samples) {
-            filtered_samples[num_filtered_samples++] = samples[i];
+    int median = calculate_median(samples, count);
+    float allowed = fabsf((float)median) * deviation / 100.0f;
+    float sum = 0.0f;
+    int accepted = 0;
+    for (int i = 0; i < count; ++i) {
+        if (fabsf((float)samples[i] - (float)median) <= allowed) {
+            sum += samples[i];
+            ++accepted;
         }
     }
-
-    // Calculate the average of the filtered samples
-    for (int i = 0; i < num_filtered_samples; i++) {
-        average_voltage += filtered_samples[i];
-    }
-
-    if (num_filtered_samples > 0) {
-        average_voltage /= num_filtered_samples;
-    } else {
-        ESP_LOGW("Sampling", "No valid samples after filtering.");
-        average_voltage = median;  // Fall back to median if no samples pass the filter
-    }
-
-    return average_voltage;
+    if (raw_mean != NULL) *raw_mean = (int)(raw_sum / count);
+    return accepted > 0 ? sum / accepted : (float)median;
 }
 
-
+/**
+ * @brief Performs smart sampling and calculates the average voltage.
+ * @param calibration The ADC calibration handle.
+ * @param adc The ADC unit handle.
+ * @param channel The ADC channel to sample.
+ * @param calibrated Indicates whether the ADC is calibrated.
+ * @return The average voltage in millivolts, or NAN on error.
+ */
+float perform_smart_sampling(adc_cali_handle_t calibration, adc_oneshot_unit_handle_t adc, adc_channel_t channel, bool calibrated) {
+     if (!calibrated || calibration == NULL || adc == NULL) return NAN;
+    size_t capacity = SENSOR_SAMPLING_COUNT_MAX;
+    if (capacity == 0 || capacity > SIZE_MAX / sizeof(int)) return NAN;
+    int *samples = malloc(capacity * sizeof(*samples));
+    if (samples == NULL) return NAN;
+    float mv = sample_voltage(calibration, adc, channel, samples, capacity, NULL, false);
+    free(samples);
+    return mv;
+}
 
 /**
- * @brief: Get CJSON object of sensor_data_t
+ * @brief Converts a sensor_data_t structure to a cJSON object.
+ * @param data The sensor data structure to convert to JSON.
+ * @return A cJSON object representing the sensor state, or NULL on error.  
  */
-cJSON *sensor_state_to_JSON(sensor_data_t *s_data) {
-
+cJSON *sensor_state_to_JSON(sensor_data_t *data) {
+    if (data == NULL || !isfinite(data->pressure) || !isfinite(data->voltage)
+        || !isfinite(data->voltage_offset)) return NULL;
     cJSON *root = cJSON_CreateObject();
-    if (root == NULL) {
+    if (root == NULL) return NULL;
+    if (cJSON_AddNumberToObject(root, "pressure", round((double)data->pressure * 100.0) / 100.0) == NULL
+        || cJSON_AddNumberToObject(root, "voltage", round((double)data->voltage * 10000.0) / 10000.0) == NULL
+        || cJSON_AddNumberToObject(root, "voltage_offset", round((double)data->voltage_offset * 1000.0) / 1000.0) == NULL
+        || cJSON_AddNumberToObject(root, "sensor_linear_multiplier", data->sensor_linear_multiplier) == NULL
+        || cJSON_AddNumberToObject(root, "voltage_raw", data->voltage_raw) == NULL) {
+        cJSON_Delete(root);
         return NULL;
     }
-
-    // pressure: 2 decimal places
-    cJSON *j_pressure = cJSON_CreateNumber(
-        roundf(s_data->pressure * 100.0f) / 100.0f
-    );
-    if (j_pressure != NULL) {
-        cJSON_AddItemToObject(root, "pressure", j_pressure);
-    }
-
-    // voltage: 4 decimal places
-    cJSON *j_voltage = cJSON_CreateNumber(
-        roundf(s_data->voltage * 10000.0f) / 10000.0f
-    );
-    if (j_voltage != NULL) {
-        cJSON_AddItemToObject(root, "voltage", j_voltage);
-    }
-
-    // voltage_offset: 3 decimal places
-    cJSON *j_voltage_offset = cJSON_CreateNumber(
-        roundf(s_data->voltage_offset * 1000.0f) / 1000.0f
-    );
-    if (j_voltage_offset != NULL) {
-        cJSON_AddItemToObject(root, "voltage_offset", j_voltage_offset);
-    }
-
-    // sensor_linear_multiplier: raw
-    cJSON *j_sensor_linear_multiplier = cJSON_CreateNumber(
-        s_data->sensor_linear_multiplier
-    );
-    if (j_sensor_linear_multiplier != NULL) {
-        cJSON_AddItemToObject(root, "sensor_linear_multiplier", j_sensor_linear_multiplier);
-    }
-
-    // voltage_raw: raw
-    cJSON *j_voltage_raw = cJSON_CreateNumber(
-        s_data->voltage_raw
-    );
-    if (j_voltage_raw != NULL) {
-        cJSON_AddItemToObject(root, "voltage_raw", j_voltage_raw);
-    }
-
     return root;
 }
 
 /**
- * @brief: Serialize pressure sensor data to JSON
- *
+ * @brief Converts a sensor_status_t structure to a cJSON object.
+ * @param status The sensor status structure to convert to JSON.
+ * @return A cJSON object representing the sensor status, or NULL on error.
  */
-char *serialize_sensor_state(sensor_data_t *s_data) {
-    char *json = NULL;
-
-    // Debugging: Print sensor data before serializing
-    /*
-    ESP_LOGD(TAG, "Data for the serialization (in function): Raw ADC Value: %d, Voltage: %.3f V, Pressure: %.3f Pa", 
-             s_data->voltage_raw, s_data->voltage, s_data->pressure);
-    */
-
-    cJSON *c_json = sensor_state_to_JSON(s_data);
-    json = cJSON_Print(c_json);
-    cJSON_Delete(c_json);
-    return json;
-}
-
-
-/**
- * @brief: Get CJSON object of sensor_status_t
- */
-cJSON *sensor_status_to_JSON(sensor_status_t *s_data) {
-
+cJSON *sensor_status_to_JSON(sensor_status_t *status) {
+    if (status == NULL) return NULL;
+    uint16_t sampling = S_DEFAULT_SENSOR_SAMPLING_ENABLE;
+    if (nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sampling) != ESP_OK)
+        return NULL;
     cJSON *root = cJSON_CreateObject();
-
-    cJSON *j_free_heap = cJSON_CreateNumber(s_data->free_heap);
-    if (j_free_heap != NULL) {
-        cJSON_AddItemToObject(root, "free_heap", j_free_heap);
-    }
-
-    cJSON *j_min_free_heap = cJSON_CreateNumber(s_data->min_free_heap);
-    if (j_min_free_heap != NULL) {
-        cJSON_AddItemToObject(root, "min_free_heap", j_min_free_heap);
-    }
-
-    cJSON *j_time_since_boot = cJSON_CreateNumber(s_data->time_since_boot);
-    if (j_time_since_boot != NULL) {
-        cJSON_AddItemToObject(root, "time_since_boot", j_time_since_boot);
-    }
-
+    if (root == NULL) return NULL;
+    if (cJSON_AddNumberToObject(root, "free_heap", status->free_heap) == NULL
+        || cJSON_AddNumberToObject(root, "min_free_heap", status->min_free_heap) == NULL
+        || cJSON_AddNumberToObject(root, "time_since_boot", status->time_since_boot) == NULL
 #if _DEVICE_ENABLE_STATUS_MEMGUARD
-    cJSON *j_memguard_threshold = cJSON_CreateNumber(s_data->memguard_threshold);
-    if (j_memguard_threshold != NULL) {
-        cJSON_AddItemToObject(root, "memguard_threshold", j_memguard_threshold);
-    }
-
-    cJSON *j_memguard_mode = cJSON_CreateNumber(s_data->memguard_mode);
-    if (j_memguard_mode != NULL) {
-        cJSON_AddItemToObject(root, "memguard_mode", j_memguard_mode);
-    }
+        || cJSON_AddNumberToObject(root, "memguard_threshold", status->memguard_threshold) == NULL
+        || cJSON_AddNumberToObject(root, "memguard_mode", status->memguard_mode) == NULL
 #endif
-
-    // get the sensor sampling enabled flag from NVS
-    uint16_t sensor_smp_en = S_DEFAULT_SENSOR_SAMPLING_ENABLE;
-    ESP_ERROR_CHECK(nvs_read_uint16(S_NAMESPACE, S_KEY_SENSOR_SAMPLING_ENABLE, &sensor_smp_en));
-    cJSON *j_sensor_sampling_enabled = cJSON_CreateNumber(sensor_smp_en);
-    if (j_sensor_sampling_enabled != NULL) {
-        cJSON_AddItemToObject(root, "sensor_sampling_enabled", j_sensor_sampling_enabled);
+        || cJSON_AddNumberToObject(root, "sensor_sampling_enabled", sampling) == NULL) {
+        cJSON_Delete(root);
+        return NULL;
     }
-
     return root;
-
 }
 
 /**
- * @brief: Serialize sensor status information to JSON string
+ * @brief Serializes sensor state information to a JSON string.
+ * @param data The sensor data structure to serialize.
+ * @return A JSON string representing the sensor state, or NULL on error.
  */
-char *serialize_sensor_status(sensor_status_t *s_data) {
+char *serialize_sensor_state(sensor_data_t *data){
 
-    char *json = NULL;
-    cJSON *c_json = sensor_status_to_JSON(s_data);
+    return print_and_delete(sensor_state_to_JSON(data));
+}
 
-    json = cJSON_Print(c_json);
-    cJSON_Delete(c_json);
-    return json;
+/**
+ * @brief Serializes sensor status information to a JSON string.
+ * @param status The sensor status structure to serialize.
+ * @return A JSON string representing the sensor status, or NULL on error.
+ */
+char *serialize_sensor_status(sensor_status_t *status) {
+
+    return print_and_delete(sensor_status_to_JSON(status));
 
 }
 
 /**
- * @brief: Compile JSON object from sensor state and device status 
+ * @brief Serializes sensor state and status information to a JSON string.
+ * @param status The sensor status structure to serialize.
+ * @param data The sensor data structure to serialize.
+ * @return A JSON string representing all device data, or NULL on error.
+ */
+char *serialize_all_device_data(sensor_status_t *status, sensor_data_t *data)
+{
+    return print_and_delete(sensor_all_to_JSON(status, data));
+}
+
+/**
+ * @brief Compiles a JSON object from sensor state and device status information.
+ * @param status The sensor status structure to include in the JSON object.
+ * @param sensor The sensor data structure to include in the JSON object.
+ * @return A cJSON object representing all device data, or NULL on error.
  */
 cJSON *sensor_all_to_JSON(sensor_status_t *status, sensor_data_t *sensor) {
 
+    if (status == NULL || sensor == NULL) return NULL;
     cJSON *root = cJSON_CreateObject();
-
-    cJSON_AddItemToObject(root, "sensor", sensor_state_to_JSON(sensor));
-    cJSON_AddItemToObject(root, "status", sensor_status_to_JSON(status));
-
+    if (root == NULL) return NULL;
+    if (!attach_owned(root, "sensor", sensor_state_to_JSON(sensor))
+        || !attach_owned(root, "status", sensor_status_to_JSON(status))) {
+        cJSON_Delete(root);
+        return NULL;
+    }
     return root;
-
-}
-
-/**
- * @brief: Serialize all device data (sensor, status) to JSON
- */
-char *serialize_all_device_data(sensor_status_t *status, sensor_data_t *sensor) {
-
-    char *json = NULL;
-    cJSON *c_json = sensor_all_to_JSON(status, sensor);
-
-    json = cJSON_Print(c_json);
-    cJSON_Delete(c_json);
-    return json;
 
 }

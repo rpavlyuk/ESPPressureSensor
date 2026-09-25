@@ -14,6 +14,7 @@
 #define ADC_ATTEN               ADC_ATTEN_DB_12        // Set attenuation
 
 #define REBOOT_ON_SENSOR_FAILURE true
+#define SENSOR_WAIT_READY_MS 30000  // Wait time for the sensor to become ready in milliseconds
 
 #define SENSOR_VALUE_STRING_MAX_LEN 32  // Max length for string representation of sensor values (e.g., "123.45")
 
@@ -28,14 +29,23 @@ typedef struct {
     uint32_t sensor_linear_multiplier;
 } sensor_data_t;
 
-extern sensor_data_t sensor_data;
+extern sensor_data_t s_sensor_data;
 
-sensor_data_t get_sensor_data();
+/* Task-context snapshot. The mutable global is deliberately no longer exported. */
+sensor_data_t get_sensor_data(void);
+/* Cooperative stop; never externally vTaskDelete() a running sensor task. */
+void sensor_request_stop(void);
+void sensor_run(void *pvParameters);
+
 bool sensor_adc_calibration_init(adc_unit_t unit, adc_channel_t channel, adc_atten_t atten, adc_cali_handle_t *out_handle);
 void sensor_adc_calibration_deinit(adc_cali_handle_t handle);
 
 int calculate_median(int* data, int size);
-float perform_smart_sampling(adc_cali_handle_t adc1_cali_handle, adc_oneshot_unit_handle_t adc1_handle, adc_channel_t channel, bool do_calibration1_pressure_sensor);
+static float sample_voltage(adc_cali_handle_t calibration,
+                            adc_oneshot_unit_handle_t adc, adc_channel_t channel,
+                            int *samples, size_t capacity, int *raw_mean,
+                            bool cancellable);
+float perform_smart_sampling(adc_cali_handle_t calibration, adc_oneshot_unit_handle_t adc, adc_channel_t channel, bool calibrated);
 
 void sensor_run(void *pvParameters);
 

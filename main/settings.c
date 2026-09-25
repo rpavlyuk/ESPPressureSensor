@@ -77,29 +77,29 @@ esp_err_t settings_init() {
     bool is_dynamically_allocated = false;
 
     // Parameter: sensor offset
-    if (nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &sensor_data.voltage_offset) == ESP_OK) {
-        ESP_LOGI(TAG, "Found parameter %s in NVS: %f", S_KEY_SENSOR_OFFSET, sensor_data.voltage_offset);
+    if (nvs_read_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, &s_sensor_data.voltage_offset) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %f", S_KEY_SENSOR_OFFSET, s_sensor_data.voltage_offset);
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_SENSOR_OFFSET);
-        sensor_data.voltage_offset = S_DEFAULT_SENSOR_OFFSET;
-        if (nvs_write_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, sensor_data.voltage_offset) == ESP_OK) {
-            ESP_LOGI(TAG, "Successfully created key %s with value %f", S_KEY_SENSOR_OFFSET, sensor_data.voltage_offset);
+        s_sensor_data.voltage_offset = S_DEFAULT_SENSOR_OFFSET;
+        if (nvs_write_float(S_NAMESPACE, S_KEY_SENSOR_OFFSET, s_sensor_data.voltage_offset) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %f", S_KEY_SENSOR_OFFSET, s_sensor_data.voltage_offset);
         } else {
-            ESP_LOGE(TAG, "Failed creating key %s with value %f", S_KEY_SENSOR_OFFSET, sensor_data.voltage_offset);
+            ESP_LOGE(TAG, "Failed creating key %s with value %f", S_KEY_SENSOR_OFFSET, s_sensor_data.voltage_offset);
             return ESP_FAIL;
         }
     }
 
     // Parameter: sensor linear multiplier
-    if (nvs_read_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, &sensor_data.sensor_linear_multiplier) == ESP_OK) {
-        ESP_LOGI(TAG, "Found parameter %s in NVS: %lu", S_KEY_SENSOR_LINEAR_MULTIPLIER, sensor_data.sensor_linear_multiplier);
+    if (nvs_read_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, &s_sensor_data.sensor_linear_multiplier) == ESP_OK) {
+        ESP_LOGI(TAG, "Found parameter %s in NVS: %lu", S_KEY_SENSOR_LINEAR_MULTIPLIER, s_sensor_data.sensor_linear_multiplier);
     } else {
         ESP_LOGW(TAG, "Unable to find parameter %s in NVS. Initiating...", S_KEY_SENSOR_LINEAR_MULTIPLIER);
-        sensor_data.sensor_linear_multiplier = S_DEFAULT_SENSOR_LINEAR_MULTIPLIER;
-        if (nvs_write_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, sensor_data.sensor_linear_multiplier) == ESP_OK) {
-            ESP_LOGI(TAG, "Successfully created key %s with value %lu", S_KEY_SENSOR_LINEAR_MULTIPLIER, sensor_data.sensor_linear_multiplier);
+        s_sensor_data.sensor_linear_multiplier = S_DEFAULT_SENSOR_LINEAR_MULTIPLIER;
+        if (nvs_write_uint32(S_NAMESPACE, S_KEY_SENSOR_LINEAR_MULTIPLIER, s_sensor_data.sensor_linear_multiplier) == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully created key %s with value %lu", S_KEY_SENSOR_LINEAR_MULTIPLIER, s_sensor_data.sensor_linear_multiplier);
         } else {
-            ESP_LOGE(TAG, "Failed creating key %s with value %lu", S_KEY_SENSOR_LINEAR_MULTIPLIER, sensor_data.sensor_linear_multiplier);
+            ESP_LOGE(TAG, "Failed creating key %s with value %lu", S_KEY_SENSOR_LINEAR_MULTIPLIER, s_sensor_data.sensor_linear_multiplier);
             return ESP_FAIL;
         }
     }
