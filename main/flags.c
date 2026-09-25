@@ -58,6 +58,10 @@ esp_err_t reset_system_bits(void) {
  */
 void dump_sys_bits(const char *why) {
     EventBits_t b = xEventGroupGetBits(g_sys_events);
+    if (g_sys_events == NULL) {
+        ESP_LOGE(TAG, "System event group is not initialized");
+        return;
+    }
     ESP_LOGI(TAG,
         "[%s] SYS bits=0x%08" PRIx32 " WIFI_CONN=%d WIFI_PROV=%d MQTT_CONN=%d MQTT_READY=%d MQTT_SUB=%d DEVICE_READY=%d UNITS_IN_MEM=%d",
         why, (uint32_t)b,
