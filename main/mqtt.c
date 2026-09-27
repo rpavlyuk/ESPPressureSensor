@@ -743,22 +743,8 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
         ESP_LOGW(TAG, "Discovery topic %s not published", topic);
         is_error = true;
     }
-    // tell we are online
-    // Publish availability as "online"
-    char *ha_availability_entry_json = ha_availability_entry_print_JSON("online");
-    msg_id = esp_mqtt_client_publish(
-        mqtt_client,
-        entity_discovery->availability->topic,
-        ha_availability_entry_json,
-        0, MQTT_QOS_PUBLISH, 1);
-
-    if (msg_id < 0) {
-        ESP_LOGW(TAG, "Availability topic %s not published",
-                entity_discovery->availability->topic);
-        is_error = true;
-    }
+    free(discovery_json);
     ha_entity_discovery_free(entity_discovery);
-    free(ha_availability_entry_json);
 
     /* Voltage */
     unit = "V";
@@ -781,6 +767,7 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
         ESP_LOGW(TAG, "Discovery topic %s not published", topic);
         is_error = true;
     }
+    free(discovery_json);
     ha_entity_discovery_free(entity_discovery);
 
     /* Voltage Offset */
@@ -804,7 +791,27 @@ esp_err_t mqtt_publish_home_assistant_config(const char *device_id, const char *
         ESP_LOGW(TAG, "Discovery topic %s not published", topic);
         is_error = true;
     }
+    free(discovery_json);
+
+    // tell we are online
+    // Publish availability as "online"
+    char *ha_availability_entry_json = ha_availability_entry_print_JSON("online");
+    msg_id = esp_mqtt_client_publish(
+        mqtt_client,
+        entity_discovery->availability->topic,
+        ha_availability_entry_json,
+        0, MQTT_QOS_PUBLISH, 1);
+
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "Availability topic %s not published",
+                entity_discovery->availability->topic);
+        is_error = true;
+    }
+    free(ha_availability_entry_json);
+
+    // Free the entity_discovery struct after publishing last parameter (Voltage Offset)
     ha_entity_discovery_free(entity_discovery);
+    // Free the entity_discovery struct after complete use
     free(entity_discovery);
     entity_discovery = NULL;
 
@@ -833,28 +840,36 @@ void mqtt_device_config_task(void *param) {
     uint32_t ha_upd_intervl;
 
     const char* LOG_TAG = "HA MQTT DEVICE";
-      
-    // Load MQTT prefix from NVS
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix));
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
-    ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_HA_UPDATE_INTERVAL, &ha_upd_intervl));
-    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_HA_PREFIX, &ha_prefix));
 
+    ESP_ERROR_CHECK(nvs_read_uint32(S_NAMESPACE, S_KEY_HA_UPDATE_INTERVAL, &ha_upd_intervl));
     ESP_LOGI(LOG_TAG, "Starting HA MQTT device update task. Update interval: %lu minutes.", (uint32_t) ha_upd_intervl / 1000 / 60);
 
     while (true) {
+
+        // Load MQTT prefix from NVS
+        ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_MQTT_PREFIX, &mqtt_prefix));
+        ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
+        ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_HA_PREFIX, &ha_prefix));
+
         // Update Home Assistant device configuration
         ESP_LOGI(LOG_TAG, "Updating HA device configurations");
-        mqtt_publish_home_assistant_config(device_id, mqtt_prefix, ha_prefix);
-        ESP_LOGI(LOG_TAG, "HA device configurations update complete");
+        esp_err_t err = mqtt_publish_home_assistant_config(device_id, mqtt_prefix, ha_prefix);
+        if (err != ESP_OK) {
+            ESP_LOGE(LOG_TAG, "Failed to publish HA device configuration: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(LOG_TAG, "HA device configuration published successfully.");
+        }
+
+        free(device_id);
+        free(mqtt_prefix);
+        free(ha_prefix);
+        device_id = NULL;
+        mqtt_prefix = NULL;
+        ha_prefix = NULL;
 
         // Wait for the defined interval before the next update
         vTaskDelay(ha_upd_intervl);
     }
-
-    free(device_id);
-    free(mqtt_prefix);
-    free(ha_prefix);
 }
 
 /**
