@@ -118,8 +118,8 @@ esp_err_t trigger_mqtt_publish(const sensor_data_t *sensor_data) {
     }
 
     if (mqtt_connection_mode < (uint16_t)MQTT_CONN_MODE_NO_RECONNECT) {
-        ESP_LOGD(TAG, "MQTT is disabled. Skipping publish.");
-        return ESP_FAIL;
+        ESP_LOGW(TAG, "MQTT is disabled. Skipping publish.");
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (mqtt_event_queue == NULL) {

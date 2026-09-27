@@ -271,10 +271,13 @@ void sensor_run(void *pvParameters)
             /* REQUIRED integration: trigger must copy *next before returning.
              * See INTEGRATION.md. Never queue this pointer itself. */
             err = trigger_mqtt_publish(&next);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to publish sensor data via MQTT: %s", esp_err_to_name(err));
+            }
         }
 cycle_done:
         if (err != ESP_OK && !stop_requested()) {
-            ESP_LOGW(TAG, "Sensor cycle skipped/failed: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "There were errors during the sensor cycle or it was interrupted: %s", esp_err_to_name(err));
         }
         if (!stop_requested()) vTaskDelay(nonzero_ticks(interval));
     }
