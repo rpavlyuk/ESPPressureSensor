@@ -1,6 +1,7 @@
 #ifndef _WEB_H
 #define _WEB_H
 
+#include "esp_vfs.h"
 #include "esp_http_server.h"
 
 #define MAX_TEMPLATE_SIZE       17408
@@ -10,18 +11,32 @@
 #define MAX_CA_CERT_SIZE        8192
 #define MAX_JSON_BUFFER_SIZE    2048
 
-#define STREAM_LINE_BUF_SZ      4096   // max line length we accept (incl. expansions)
-#define STREAM_READ_LINE_SZ     2048   // fgets read size; must be <= STREAM_LINE_BUF_SZ
+#define STREAM_LINE_BUF_SZ      65535   // max line length we accept (incl. expansions)
+#define STREAM_READ_LINE_SZ     32768   // fgets read size; must be <= STREAM_LINE_BUF_SZ
 #define STATIC_PATH_PREFIX      "/spiffs/static-"  // /static/x.js -> /spiffs/static-x.js
 #define ENABLE_PLACEHOLDER_REPLACEMENT false  // set to true to enable placeholder replacement in static files
 #define ENABLE_STATIC_NOCACHE_HEADER   true  // set to true to add no-cache headers to static file responses
 #define ENABLE_CONFIG_PLACEHOLDER_REPLACEMENT false  // set to true to enable placeholder replacement in config.html
+
+#define STATIC_BASE_PATH        "/spiffs"  // Base path for SPIFFS file system
+
+/* Scratch buffer size */
+#define SCRATCH_BUFSIZE  8192
+
+struct file_server_data {
+    /* Base path of file storage */
+    char base_path[ESP_VFS_PATH_MAX + 1];
+
+    /* Scratch buffer for temporary storage during file transfer */
+    char scratch[SCRATCH_BUFSIZE];
+};
 
 void run_http_server(void *param);
 esp_err_t stop_http_server(httpd_handle_t server);
 esp_err_t http_stop(void);
 
 static esp_err_t config_get_handler(httpd_req_t *req);
+static esp_err_t wifi_provision_get_handler(httpd_req_t *req);
 static esp_err_t submit_config_handler(httpd_req_t *req);
 static esp_err_t reboot_handler(httpd_req_t *req);
 #if _DEVICE_ENABLE_ZIGBEE
@@ -40,6 +55,7 @@ static esp_err_t get_settings_all_handler(httpd_req_t *req);
 static esp_err_t get_setting_one_handler(httpd_req_t *req);
 static esp_err_t get_ca_certificate_handler(httpd_req_t *req);
 static esp_err_t api_control_handler(httpd_req_t *req);
+static esp_err_t wifi_provision_post_handler(httpd_req_t *req);
 
 void assign_static_page_variables(char *html_output);
 void replace_placeholder(char *html_output, const char *placeholder, const char *value);
@@ -52,7 +68,6 @@ static esp_err_t validate_device_identity_from_get_query(httpd_req_t *req);
 static esp_err_t validate_device_identity_from_json(const cJSON *json);
 
 static void json_value_to_string(const cJSON *v, char *out, size_t out_sz);
-static const char *content_type_from_ext(const char *path);
 
 int hex2dec(char c);
 void url_decode(char *str);

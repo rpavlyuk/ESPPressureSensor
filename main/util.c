@@ -4,6 +4,7 @@
  */
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include "cJSON.h"
 #include "util.h"
 
@@ -76,4 +77,69 @@ int calculate_median(int* data, int size) {
     }
     if (size % 2 != 0) return data[size / 2];
     return (int)(((int64_t)data[size / 2 - 1] + data[size / 2]) / 2);
+}
+
+/** WFI helper functions **/
+
+/** 
+ * @brief Clear temporary credential buffers before returning from the HTTP handler.
+ * @param buffer The buffer to clear.
+ * @param length The length of the buffer.
+ */
+void wifi_provision_clear(void *buffer, size_t length) {
+    volatile unsigned char *p = buffer;
+    while (length--) *p++ = 0;
+}
+
+/** File handling utility functions **/
+
+/**
+ * @brief Checks if a file is minified based on its name: returns true if it contains suffix ".min."
+ * @param file_name The name of the file to check.
+ * @return true if the file is minified, false otherwise.
+ */
+bool is_minified_file(const char *file_name) {
+    if (file_name == NULL) return false;
+    return strstr(file_name, ".min.") != NULL;
+}
+
+/**
+ * @brief Determines the content type based on the file extension.
+ *
+ * This function takes a file path as input and returns the corresponding
+ * MIME content type based on the file extension. If the extension is not
+ * recognized, it defaults to "application/octet-stream".
+ *
+ * @param path The file path to analyze.
+ * @return The corresponding content type as a string.
+ */
+const char *content_type_from_ext(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return "application/octet-stream";
+
+    if (strcasecmp(dot, ".html") == 0) return "text/html";
+    if (strcasecmp(dot, ".css")  == 0) return "text/css";
+    if (strcasecmp(dot, ".js")   == 0) return "application/javascript";
+    if (strcasecmp(dot, ".json") == 0) return "application/json";
+    if (strcasecmp(dot, ".svg")  == 0) return "image/svg+xml";
+    if (strcasecmp(dot, ".png")  == 0) return "image/png";
+    if (strcasecmp(dot, ".jpg")  == 0 || strcasecmp(dot, ".jpeg") == 0) return "image/jpeg";
+    if (strcasecmp(dot, ".ico")  == 0) return "image/x-icon";
+    if (strcasecmp(dot, ".txt")  == 0) return "text/plain";
+
+    return "application/octet-stream";
+}
+
+/**
+ * @brief Determines if the MIME type of a file is text-based.
+ *
+ * This function checks the content type of the given file path and returns true
+ * if it is a text-based MIME type (e.g., text/html, text/css, application/javascript, application/json).
+ *
+ * @param path The file path to analyze.
+ * @return true if the MIME type is text-based, false otherwise.
+ */
+bool is_text_based_mimetype(const char *path) {
+    const char *ctype = content_type_from_ext(path);
+    return ctype && (strstr(ctype, "text/") == ctype || strcmp(ctype, "application/javascript") == 0 || strcmp(ctype, "application/json") == 0);
 }

@@ -6,9 +6,10 @@
 /**
  * Enabling functional modules
  */
-#define _DEVICE_ENABLE_WIFI     true
-#define _DEVICE_ENABLE_HTTP_API             (true && _DEVICE_ENABLE_WIFI)
-#define _DEVICE_ENABLE_WEB                  (true && _DEVICE_ENABLE_HTTP_API)
+#define _DEVICE_ENABLE_WIFI                     true
+#define _DEVICE_ENABLE_HTTP_API                 (true && _DEVICE_ENABLE_WIFI)
+#define _DEVICE_ENABLE_WEB                      (true && _DEVICE_ENABLE_HTTP_API)
+#define _DEVICE_ENABLE_WIFI_WEB_PROVISIONING    (true && _DEVICE_ENABLE_WIFI && _DEVICE_ENABLE_WEB)
 
 #define _DEVICE_ENABLE_MQTT         (true && _DEVICE_ENABLE_WIFI)
 #define _DEVICE_ENABLE_HA           (true && _DEVICE_ENABLE_MQTT)

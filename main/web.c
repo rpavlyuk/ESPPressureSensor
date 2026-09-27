@@ -3,6 +3,7 @@
 #include "esp_spiffs.h"  // Include for SPIFFS
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
+#include "esp_wifi.h"
 
 #include "esp_http_server.h"
 #include "non_volatile_storage.h"
@@ -12,6 +13,7 @@
 #include "version.h"
 #include "common.h"
 #include "settings.h"
+#include "util.h"
 #include "flags.h"
 #include "sensor.h"
 #include "zigbee.h"
@@ -34,21 +36,45 @@ static httpd_handle_t server = NULL;
  */
 void run_http_server(void *param) {
 
-    // wait for Wi-Fi to connect
-    ESP_LOGI(TAG, "HTTPD Server: Waiting for Wi-Fi/network to become ready...");
 
-    xEventGroupWaitBits(
-        g_sys_events,            // event group handle
-        BIT_WIFI_CONNECTED,      // bit(s) to wait for
-        pdFALSE,                 // don’t clear the bit when unblocked
-        pdTRUE,                  // wait until *all* bits are set (only one here)
-        portMAX_DELAY            // wait forever
-    );
+    // if bit BIT_WIFI_PROVISIONING_IN_PROGRESS is set, it means Wi-Fi provisioning is in progress
+    // so proceed to start the HTTP server for provisioning
+    // otherwise -- wait for Wi-Fi to connect before starting the HTTP server
 
-    ESP_LOGI(TAG, "HTTPD Server: Wi-Fi/network is ready!");
+    if (xEventGroupGetBits(g_sys_events) & BIT_WIFI_PROVISIONING_IN_PROGRESS) {
+        ESP_LOGI(TAG, "Wi-Fi provisioning is in progress. Starting HTTP server for provisioning...");
+    } else {
+        // wait for Wi-Fi to connect
+        ESP_LOGI(TAG, "HTTPD Server: Waiting for Wi-Fi/network to become ready...");
 
+        xEventGroupWaitBits(
+            g_sys_events,            // event group handle
+            BIT_WIFI_CONNECTED,      // bit(s) to wait for
+            pdFALSE,                 // don’t clear the bit when unblocked
+            pdTRUE,                  // wait until *all* bits are set (only one here)
+            portMAX_DELAY            // wait forever
+        );
+
+        ESP_LOGI(TAG, "HTTPD Server: Wi-Fi/network is ready!");
+    }
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
 #if _DEVICE_ENABLE_WEB
+    static struct file_server_data *f_server_data = NULL;
+
+    if (f_server_data) {
+        ESP_LOGE(TAG, "File server already started");
+        vTaskDelete(NULL);
+    }
+
+    /* Allocate memory for server data */
+    f_server_data = calloc(1, sizeof(struct file_server_data));
+    if (!f_server_data) {
+        ESP_LOGE(TAG, "Failed to allocate memory for static file server data");
+        vTaskDelete(NULL);
+    }
+    strlcpy(f_server_data->base_path, STATIC_BASE_PATH,
+            sizeof(f_server_data->base_path));
+
     config.max_uri_handlers = 24;
 #else
     config.max_uri_handlers = 16;
@@ -56,6 +82,10 @@ void run_http_server(void *param) {
     config.stack_size = 16384;
     config.recv_wait_timeout = 20;
     config.uri_match_fn = httpd_uri_match_wildcard;
+    if (xEventGroupGetBits(g_sys_events) & BIT_WIFI_PROVISIONING_IN_PROGRESS) {
+        config.server_port = 8080;  // Set alternative server port for provisioning
+        config.ctrl_port   = 32769;
+    }
 
     // Start the httpd server
     ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
@@ -65,15 +95,37 @@ void run_http_server(void *param) {
         int h_count = 0; // handler count
 #if _DEVICE_ENABLE_WEB
         // Set WEB URI handlers
+        httpd_uri_t root_uri;
+        if (xEventGroupGetBits(g_sys_events) & BIT_WIFI_PROVISIONING_IN_PROGRESS) {
+            ESP_LOGI(TAG, "Wi-Fi provisioning is in progress. Default root URI will point to provisioning page.");
+            root_uri = (httpd_uri_t){
+                .uri       = "/",
+                .method    = HTTP_GET,
+                .handler   = wifi_provision_get_handler,
+                .user_ctx  = NULL
+            };
+        } else {
+            ESP_LOGI(TAG, "Wi-Fi provisioning is not in progress. Default root URI will point to config page.");
+            root_uri = (httpd_uri_t){
+                .uri       = "/",
+                .method    = HTTP_GET,
+                .handler   = config_get_handler,
+                .user_ctx  = NULL
+            };
+        }
+        err = httpd_register_uri_handler(server, &root_uri);
+        ESP_LOGI(TAG, "Register %s => %s", root_uri.uri, esp_err_to_name(err));
+        h_count++;
+
         httpd_uri_t config_uri = {
-            .uri       = "/",
+            .uri       = "/config",
             .method    = HTTP_GET,
             .handler   = config_get_handler,
             .user_ctx  = NULL
         };
         err = httpd_register_uri_handler(server, &config_uri);
         ESP_LOGI(TAG, "Register %s => %s", config_uri.uri, esp_err_to_name(err));
-        h_count++;
+        h_count++;      
 
         httpd_uri_t status_uri = {
             .uri       = "/status",
@@ -83,6 +135,16 @@ void run_http_server(void *param) {
         };
         err = httpd_register_uri_handler(server, &status_uri);
         ESP_LOGI(TAG, "Register %s => %s", status_uri.uri, esp_err_to_name(err));
+        h_count++;
+
+        httpd_uri_t wifi_provision_page_uri = {
+            .uri       = "/wifi",
+            .method    = HTTP_GET,
+            .handler   = wifi_provision_get_handler,
+            .user_ctx  = NULL
+        };
+        err = httpd_register_uri_handler(server, &wifi_provision_page_uri);
+        ESP_LOGI(TAG, "Register %s => %s", wifi_provision_page_uri.uri, esp_err_to_name(err));
         h_count++;
 
         httpd_uri_t submit_uri = {
@@ -138,7 +200,7 @@ void run_http_server(void *param) {
             .uri        = "/static/*",
             .method     = HTTP_GET,
             .handler    = static_stream_handler,
-            .user_ctx   = NULL
+            .user_ctx   = f_server_data  // Pass the server data as user context
         };
 
         err = httpd_register_uri_handler(server, &static_uri);
@@ -171,6 +233,17 @@ void run_http_server(void *param) {
 #endif
 
 #if _DEVICE_ENABLE_HTTP_API
+        // Register the Wi-Fi provisioning API handler
+        httpd_uri_t wifi_provision_uri = {
+            .uri      = "/api/wifi/provision",
+            .method   = HTTP_POST,
+            .handler  = wifi_provision_post_handler,
+            .user_ctx = NULL
+        };
+        err = httpd_register_uri_handler(server, &wifi_provision_uri);
+        ESP_LOGI(TAG, "Register %s => %s", wifi_provision_uri.uri, esp_err_to_name(err));
+        if (err == ESP_OK) h_count++;
+
         // Register the status web service handler
         httpd_uri_t status_webserver_get_uri = {
             .uri       = "/api/status",
@@ -241,7 +314,6 @@ void run_http_server(void *param) {
         ESP_LOGI(TAG, "%d HTTP handlers registered. Server ready!", h_count);
     } else {
         ESP_LOGE(TAG, "Error starting HTTPD server!");
-        return;
     }
 
     while(server) {
@@ -573,32 +645,6 @@ void url_decode(char *src) {
     *dst = '\0'; // Null-terminate the decoded string
 }
 
-/**
- * @brief Determines the content type based on the file extension.
- *
- * This function takes a file path as input and returns the corresponding
- * MIME content type based on the file extension. If the extension is not
- * recognized, it defaults to "application/octet-stream".
- *
- * @param path The file path to analyze.
- * @return The corresponding content type as a string.
- */
-static const char *content_type_from_ext(const char *path) {
-    const char *dot = strrchr(path, '.');
-    if (!dot) return "application/octet-stream";
-
-    if (strcasecmp(dot, ".html") == 0) return "text/html";
-    if (strcasecmp(dot, ".css")  == 0) return "text/css";
-    if (strcasecmp(dot, ".js")   == 0) return "application/javascript";
-    if (strcasecmp(dot, ".json") == 0) return "application/json";
-    if (strcasecmp(dot, ".svg")  == 0) return "image/svg+xml";
-    if (strcasecmp(dot, ".png")  == 0) return "image/png";
-    if (strcasecmp(dot, ".jpg")  == 0 || strcasecmp(dot, ".jpeg") == 0) return "image/jpeg";
-    if (strcasecmp(dot, ".ico")  == 0) return "image/x-icon";
-    if (strcasecmp(dot, ".txt")  == 0) return "text/plain";
-
-    return "application/octet-stream";
-}
 
 /**
  * @brief Validates device identity from HTTP request query parameters.
@@ -767,6 +813,99 @@ static void json_value_to_string(const cJSON *v, char *out, size_t out_sz)
 
 
 /* WEB Handlers */
+
+/**
+ * @brief HTTP GET handler for the WiFi provision page.
+ *
+ * This function handles HTTP GET requests for the WiFi provision page.
+ * It sends a simple response indicating the WiFi provision page.
+ *
+ * @param req Pointer to the HTTP request structure.
+ * @return ESP_OK on success.
+ */
+static esp_err_t wifi_provision_get_handler(httpd_req_t *req) {
+    ESP_LOGI(TAG, "Processing wifi provision GET request");
+
+    // empty message
+    const char* message = "";
+
+    // Prefer one big allocation to reduce fragmentation
+    const size_t buf_size = MAX_LARGE_TEMPLATE_SIZE + 1;
+    // const size_t total = buf_size * 2;
+    const size_t total = buf_size;
+
+    char *mem = (char *)malloc(total);
+
+    if (!mem) {
+        ESP_LOGE(TAG, "OOM: wifi page handler needs %u bytes (free=%u, min_free=%u)",
+                 (unsigned)total,
+                 (unsigned)esp_get_free_heap_size(),
+                 (unsigned)esp_get_minimum_free_heap_size());
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "ESP device is out of free memory");
+        return ESP_FAIL;
+    }
+
+    // Assign pointers within the allocated block
+    char *html_output    = mem;
+
+    // html_template[0] = '\0';
+    html_output[0] = '\0';
+
+    // Read the template from SPIFFS (assuming you're loading it from SPIFFS)
+    FILE *f = fopen("/spiffs/wifi.html", "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for reading");
+        free(mem);
+        httpd_resp_send_404(req);
+        return ESP_FAIL;
+    }
+
+    // Load the template into html_output
+    size_t len = fread(html_output, 1, buf_size - 1, f);
+    if (len == buf_size - 1 && !feof(f)) {
+        ESP_LOGE(TAG, "wifi.html too large (>%u bytes)", (unsigned)(buf_size - 1));
+        fclose(f);
+        free(mem);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    fclose(f);
+    html_output[len] = '\0'; // Null-terminate the string
+
+    char *device_id = NULL;
+    char *device_serial = NULL;
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id));
+    ESP_ERROR_CHECK(nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial));
+    replace_placeholder(html_output, "{VAL_DEVICE_ID}", device_id);
+    replace_placeholder(html_output, "{VAL_DEVICE_SERIAL}", device_serial);
+
+    // replace static fields
+    assign_static_page_variables(html_output);
+
+    // get current Wi-Fi settings
+    wifi_config_t config = {0};
+    esp_err_t err = esp_wifi_get_config(WIFI_IF_STA, &config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Cannot read Wi-Fi settings: %s",
+                 esp_err_to_name(err));
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "Cannot read current Wi-Fi settings");
+        return ESP_FAIL;
+    }
+    replace_placeholder(html_output, "{VAL_WIFI_SSID}", (char *)config.sta.ssid);
+    replace_placeholder(html_output, "{VAL_WIFI_PASSWORD}", (char *)config.sta.password);
+    wifi_provision_clear(&config, sizeof(config));
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, html_output, strlen(html_output));
+
+    free(mem);
+    free(device_id);
+    free(device_serial);
+    return ESP_OK;
+}
+
 /**
 * @brief HTTP GET handler for the configuration page.
 *
@@ -778,7 +917,6 @@ static void json_value_to_string(const cJSON *v, char *out, size_t out_sz)
 * @return ESP_OK on success, ESP_FAIL on failure.
 */
 static esp_err_t config_get_handler(httpd_req_t *req) {
-    ESP_LOGI(TAG, "Processing config web request");
     ESP_LOGI(TAG, "Processing config web request");
 
     // empty message
@@ -2023,106 +2161,150 @@ static esp_err_t static_stream_handler(httpd_req_t *req) {
     httpd_resp_set_hdr(req, "Cache-Control", "max-age=3600"); // optional
 #endif
 
-    // Buffers
-    char *read_line = (char *)malloc(STREAM_READ_LINE_SZ);
-    char *work_line = (char *)malloc(STREAM_LINE_BUF_SZ);
-    if (!read_line || !work_line) {
-        fclose(f);
-        free(read_line);
-        free(work_line);
-        httpd_resp_send_500(req);
-        return ESP_OK;
-    }
+    // Now we have two ways to stream: line-by-line (with placeholder replacement) or chunked (raw). 
+    //We'll do line-by-line if:
+    // 1. Placeholder replacement is enabled
+    // 2. OR file is not minified (function bool is_minified_file(const char *file_name) returns false)
+    // 2. OR mimetype is text-based (text/html, text/css, application/javascript, etc.), but not minified (function bool is_text_based_mimetype(const char *file_name) returns true)
+    bool do_line_by_line = ENABLE_PLACEHOLDER_REPLACEMENT || !is_minified_file(filepath) || (is_text_based_mimetype(filepath) && !is_minified_file(filepath));
+
+    if (do_line_by_line) {
+        ESP_LOGI(TAG, "Streaming file line-by-line: %s", filepath);
+        // Buffers
+        char *read_line = (char *)malloc(STREAM_READ_LINE_SZ);
+        char *work_line = (char *)malloc(STREAM_LINE_BUF_SZ);
+        if (!read_line || !work_line) {
+            fclose(f);
+            free(read_line);
+            free(work_line);
+            httpd_resp_send_500(req);
+            return ESP_OK;
+        }
 
 #if ENABLE_PLACEHOLDER_REPLACEMENT
-    // NOTE: If you want these per-request, extract them from query params.
-    // For now, keep placeholders consistent with the rest of your templating model.
-    char *device_id = NULL;
-    char *device_serial = NULL;
+        // NOTE: If you want these per-request, extract them from query params.
+        // For now, keep placeholders consistent with the rest of your templating model.
+        char *device_id = NULL;
+        char *device_serial = NULL;
 
-    esp_err_t err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id);
-    if (err != ESP_OK || !device_id) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read device_id from NVS");
-        return ESP_FAIL;
-    }
+        esp_err_t err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_ID, &device_id);
+        if (err != ESP_OK || !device_id) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read device_id from NVS");
+            return ESP_FAIL;
+        }
 
-    err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial);
-    if (err != ESP_OK || !device_serial) {
-        free(device_id);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read device_serial from NVS");
-        return ESP_FAIL;
-    }
+        err = nvs_read_string(S_NAMESPACE, S_KEY_DEVICE_SERIAL, &device_serial);
+        if (err != ESP_OK || !device_serial) {
+            free(device_id);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read device_serial from NVS");
+            return ESP_FAIL;
+        }
  #endif
 
-    while (fgets(read_line, STREAM_READ_LINE_SZ, f) != NULL) {
-        // If the line is longer than STREAM_READ_LINE_SZ-1, fgets returns a partial line
-        // (no '\n' and not EOF). This approach cannot safely template such lines.
-        size_t rl = strlen(read_line);
-        if (rl == STREAM_READ_LINE_SZ - 1 && read_line[rl - 1] != '\n' && !feof(f)) {
-            ESP_LOGE(TAG,
-                     "Line too long in %s; increase STREAM_READ_LINE_SZ/STREAM_LINE_BUF_SZ "
-                     "or avoid templating large/minified assets",
-                     filepath);
-            fclose(f);
-            free(read_line);
-            free(work_line);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template line too long");
-            return ESP_OK;
-        }
+        while (fgets(read_line, STREAM_READ_LINE_SZ, f) != NULL) {
+            // If the line is longer than STREAM_READ_LINE_SZ-1, fgets returns a partial line
+            // (no '\n' and not EOF). This approach cannot safely template such lines.
+            size_t rl = strlen(read_line);
+            if (rl == STREAM_READ_LINE_SZ - 1 && read_line[rl - 1] != '\n' && !feof(f)) {
+                ESP_LOGE(TAG,
+                        "Line too long in %s; increase STREAM_READ_LINE_SZ/STREAM_LINE_BUF_SZ "
+                        "or avoid templating large/minified assets",
+                        filepath);
+                fclose(f);
+                free(read_line);
+                free(work_line);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template line too long");
+                return ESP_OK;
+            }
 
-        // Copy into a larger working buffer to give replacements room to expand
-        strlcpy(work_line, read_line, STREAM_LINE_BUF_SZ);
+            // Copy into a larger working buffer to give replacements room to expand
+            strlcpy(work_line, read_line, STREAM_LINE_BUF_SZ);
 
 #if ENABLE_PLACEHOLDER_REPLACEMENT
-        // Replace placeholders safely (bounded)
-        esp_err_t r;
+            // Replace placeholders safely (bounded)
+            esp_err_t r;
 
-        r = replace_placeholder_sized(work_line, STREAM_LINE_BUF_SZ,
-                                      "{VAL_DEVICE_ID}", device_id);
-        if (r != ESP_OK) {
-            ESP_LOGE(TAG, "Template expansion overflow in %s (device_id): %s",
-                     filepath, esp_err_to_name(r));
-            fclose(f);
-            free(read_line);
-            free(work_line);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template expansion overflow");
-            return ESP_OK;
-        }
+            r = replace_placeholder_sized(work_line, STREAM_LINE_BUF_SZ,
+                                        "{VAL_DEVICE_ID}", device_id);
+            if (r != ESP_OK) {
+                ESP_LOGE(TAG, "Template expansion overflow in %s (device_id): %s",
+                        filepath, esp_err_to_name(r));
+                fclose(f);
+                free(read_line);
+                free(work_line);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template expansion overflow");
+                return ESP_OK;
+            }
 
-        r = replace_placeholder_sized(work_line, STREAM_LINE_BUF_SZ,
-                                      "{VAL_DEVICE_SERIAL}", device_serial);
-        if (r != ESP_OK) {
-            ESP_LOGE(TAG, "Template expansion overflow in %s (device_serial): %s",
-                     filepath, esp_err_to_name(r));
-            fclose(f);
-            free(read_line);
-            free(work_line);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template expansion overflow");
-            return ESP_OK;
-        }
+            r = replace_placeholder_sized(work_line, STREAM_LINE_BUF_SZ,
+                                        "{VAL_DEVICE_SERIAL}", device_serial);
+            if (r != ESP_OK) {
+                ESP_LOGE(TAG, "Template expansion overflow in %s (device_serial): %s",
+                        filepath, esp_err_to_name(r));
+                fclose(f);
+                free(read_line);
+                free(work_line);
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template expansion overflow");
+                return ESP_OK;
+            }
 #endif
-        // Stream it out
-        esp_err_t err = httpd_resp_send_chunk(req, work_line, HTTPD_RESP_USE_STRLEN);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "send_chunk failed (err=0x%x)", (unsigned)err);
-            break;
+            // Stream it out
+            esp_err_t err = httpd_resp_send_chunk(req, work_line, HTTPD_RESP_USE_STRLEN);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "send_chunk failed (err=0x%x)", (unsigned)err);
+                break;
+            }
+
+            // Optional: yield a tick if you ever template larger pages to avoid WDT starvation
+            // vTaskDelay(1);
         }
 
-        // Optional: yield a tick if you ever template larger pages to avoid WDT starvation
-        // vTaskDelay(1);
+        free(read_line);
+        free(work_line);
+
+#if ENABLE_PLACEHOLDER_REPLACEMENT
+        free(device_id);
+        free(device_serial);
+#endif
+
+        httpd_resp_set_hdr(req, "Connection", "close");
+        // End chunked response
+        httpd_resp_send_chunk(req, NULL, 0);
+
+    } else {
+        ESP_LOGI(TAG, "Streaming file in raw chunks: %s", filepath);
+        /* Retrieve the pointer to scratch buffer for temporary storage */
+        char *chunk = ((struct file_server_data *)req->user_ctx)->scratch;
+        size_t chunksize;
+        do {
+            /* Read file in chunks into the scratch buffer */
+            chunksize = fread(chunk, 1, SCRATCH_BUFSIZE, f);
+
+            if (chunksize > 0) {
+                /* Send the buffer contents as HTTP response chunk */
+                if (httpd_resp_send_chunk(req, chunk, chunksize) != ESP_OK) {
+                    fclose(f);
+                    ESP_LOGE(TAG, "File sending failed!");
+                    /* Abort sending file */
+                    httpd_resp_sendstr_chunk(req, NULL);
+                    /* Respond with 500 Internal Server Error */
+                    httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file");
+                return ESP_FAIL;
+            }
+            }
+
+            /* Keep looping till the whole file is sent */
+        } while (chunksize != 0);
+
+        ESP_LOGI(TAG, "File sending complete");
+
+        httpd_resp_set_hdr(req, "Connection", "close");
+        httpd_resp_send_chunk(req, NULL, 0);
+
+
     }
-
+    
     fclose(f);
-    free(read_line);
-    free(work_line);
-
-#if ENABLE_PLACEHOLDER_REPLACEMENT
-    free(device_id);
-    free(device_serial);
-#endif
-
-    // End chunked response
-    httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -2678,6 +2860,169 @@ static esp_err_t api_control_handler(httpd_req_t *req) {
 
     // Handle API control requests here
     return ESP_OK;
+}
+
+
+/**
+ * @brief Save STA credentials in the Wi-Fi driver's standard NVS storage.
+ * POST /api/wifi/provision
+ * {"device_id":"...", "device_serial":"...", "ssid":"...", "password":"..."}
+ *
+ * Requires initialized Wi-Fi with STA enabled (WIFI_MODE_STA or WIFI_MODE_APSTA)
+ * and Wi-Fi NVS enabled. Does not connect, disconnect, or reboot. The caller
+ * should arrange a reboot after receiving success. This updates the driver's
+ * current STA configuration as well as flash; it is not a separate staging area.
+ * Do not submit credentials concurrently through the provisioning manager.
+ */
+static esp_err_t wifi_provision_post_handler(httpd_req_t *req) {
+    char content[MAX_JSON_BUFFER_SIZE] = {0};
+    wifi_config_t wifi_config = {0};
+    cJSON *json = NULL;
+    cJSON *password_item = NULL;
+    const char *http_status = "400 Bad Request";
+    const char *message = "Invalid JSON request";
+    bool saved = false;
+    bool close_connection = false;
+    size_t received = 0;
+
+    if (req->content_len == 0 || req->content_len >= sizeof(content)) {
+        message = "Empty or oversized request body";
+        close_connection = true;
+        goto cleanup;
+    }
+    while (received < req->content_len) {
+        int n = httpd_req_recv(req, content + received, req->content_len - received);
+        if (n <= 0) {
+            http_status = n == HTTPD_SOCK_ERR_TIMEOUT ? "408 Request Timeout" : "400 Bad Request";
+            message = "Could not receive the complete request";
+            close_connection = true;
+            goto cleanup;
+        }
+        received += (size_t)n;
+    }
+    content[received] = '\0';
+    if (memchr(content, '\0', received)) goto cleanup;
+
+    // Reject escaped NUL: cJSON represents strings as NUL-terminated C strings.
+    // Skip escaped backslashes so a literal "\\u0000" is not misinterpreted.
+    for (size_t i = 0; i < received; ++i) {
+        if (content[i] == '\\' && i + 1 < received) {
+            ++i;
+            if (content[i] == 'u' && i + 4 < received &&
+                memcmp(content + i + 1, "0000", 4) == 0) goto cleanup;
+        }
+    }
+    // Reject trailing non-whitespace data as well as invalid JSON.
+    json = cJSON_ParseWithLengthOpts(content, received + 1, NULL, true);
+    if (!cJSON_IsObject(json)) goto cleanup;
+
+    // Require exactly one string value for each field, including empty password.
+    const char *keys[] = {"device_id", "device_serial", "ssid", "password"};
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+        unsigned count = 0;
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, json) {
+            if (item->string && strcmp(item->string, keys[i]) == 0) ++count;
+        }
+        const cJSON *value = cJSON_GetObjectItemCaseSensitive(json, keys[i]);
+        if (count != 1 || !cJSON_IsString(value) || !value->valuestring) {
+            message = "Provide device_id, device_serial, ssid and password as unique string fields";
+            goto cleanup;
+        }
+    }
+    // This helper returns a result only; the handler must send its own response.
+    if (validate_device_identity_from_json(json) != ESP_OK) {
+        http_status = "403 Forbidden";
+        message = "Device identity validation failed";
+        goto cleanup;
+    }
+
+    const cJSON *ssid_item = cJSON_GetObjectItemCaseSensitive(json, "ssid");
+    password_item = cJSON_GetObjectItemCaseSensitive(json, "password");
+    size_t ssid_len = strlen(ssid_item->valuestring);
+    size_t password_len = strlen(password_item->valuestring);
+    if (ssid_len == 0 || ssid_len > sizeof(wifi_config.sta.ssid)) {
+        message = "SSID must contain 1-32 bytes";
+        goto cleanup;
+    }
+    // Open networks or WPA/WPA2/WPA3 personal credentials; no enterprise EAP.
+    if (password_len != 0 && (password_len < 8 || password_len > 64)) {
+        message = "Password must be empty, 8-63 ASCII characters, or 64 hexadecimal digits";
+        goto cleanup;
+    }
+    for (size_t i = 0; i < password_len; ++i) {
+        unsigned char c = (unsigned char)password_item->valuestring[i];
+        if ((password_len == 64 && !isxdigit(c)) ||
+            (password_len != 64 && (c < 32 || c > 126))) {
+            message = "Password must be empty, 8-63 ASCII characters, or 64 hexadecimal digits";
+            goto cleanup;
+        }
+    }
+
+#if !CONFIG_ESP_WIFI_NVS_ENABLED
+    http_status = "500 Internal Server Error";
+    message = "Wi-Fi NVS storage is disabled in the firmware configuration";
+    goto cleanup;
+#endif
+
+    wifi_mode_t mode;
+    esp_err_t err = esp_wifi_get_mode(&mode);
+    if (err != ESP_OK || (mode != WIFI_MODE_STA && mode != WIFI_MODE_APSTA)) {
+        http_status = "409 Conflict";
+        message = "Initialize Wi-Fi in STA or APSTA mode before saving credentials";
+        goto cleanup;
+    }
+    // Full-length SSID/PSK arrays need not be NUL-terminated in wifi_config_t.
+    memcpy(wifi_config.sta.ssid, ssid_item->valuestring, ssid_len);
+    memcpy(wifi_config.sta.password, password_item->valuestring, password_len);
+    wifi_config.sta.pmf_cfg.capable = true;
+    wifi_config.sta.pmf_cfg.required = false;
+
+    err = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    if (err == ESP_OK) err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    if (err != ESP_OK) {
+        // Never log the request body, Wi-Fi password, or device serial.
+        ESP_LOGE(TAG, "Saving Wi-Fi credentials failed: %s", esp_err_to_name(err));
+        if (err == ESP_ERR_WIFI_STATE) {
+            http_status = "409 Conflict";
+            message = "Wi-Fi is busy connecting; retry when the connection attempt has stopped";
+        } else if (err == ESP_ERR_WIFI_PASSWORD || err == ESP_ERR_INVALID_ARG) {
+            message = "Wi-Fi driver rejected the supplied credentials";
+        } else {
+            http_status = "500 Internal Server Error";
+            message = "Failed to save Wi-Fi credentials";
+        }
+        goto cleanup;
+    }
+    saved = true;
+    http_status = "200 OK";
+    message = "Wi-Fi credentials saved";
+    ESP_LOGI(TAG, "Wi-Fi STA credentials saved; connection has not been tested");
+
+cleanup:
+    // Wipe all parsed top-level string values, including identity and password.
+    if (cJSON_IsObject(json)) {
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, json) {
+            if (cJSON_IsString(item) && item->valuestring)
+                wifi_provision_clear(item->valuestring, strlen(item->valuestring));
+        }
+    }
+    cJSON_Delete(json);
+    wifi_provision_clear(content, sizeof(content));
+    wifi_provision_clear(&wifi_config, sizeof(wifi_config));
+
+    // Messages above are fixed literals, never interpolated user input.
+    char response[320];
+    snprintf(response, sizeof(response),
+             "{\"status\":%d,\"message\":\"%s\",\"reboot_required\":%s,\"connection_tested\":false}",
+             saved ? 0 : 1, message, saved ? "true" : "false");
+    httpd_resp_set_status(req, http_status);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    if (close_connection) httpd_resp_set_hdr(req, "Connection", "close");
+    esp_err_t result = httpd_resp_send(req, response, HTTPD_RESP_USE_STRLEN);
+    return close_connection ? ESP_FAIL : result;
 }
 
 /** HTTP Server control routines */

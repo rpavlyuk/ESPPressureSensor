@@ -447,6 +447,7 @@ void start_wifi(bool provisioned)
                                                          softap_password));
 #endif
         print_prov_qr_softap(softap_ssid, softap_password);
+        xEventGroupSetBits(g_sys_events, BIT_WIFI_PROVISIONING_IN_PROGRESS);
     } else {
         ESP_LOGI(TAG, "Already provisioned, starting Wi-Fi");
 

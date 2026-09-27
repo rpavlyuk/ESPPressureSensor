@@ -57,7 +57,12 @@ void app_main(void) {
     esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
     esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
     esp_log_level_set("non_volatile_storage", ESP_LOG_WARN);
+#if _DEVICE_ENGINEERING_BUILD
     esp_log_level_set("NVS_LARGE", ESP_LOG_VERBOSE);
+    esp_log_level_set("esp_netif_lwip", ESP_LOG_VERBOSE);
+    esp_log_level_set("wifi", ESP_LOG_VERBOSE);
+    esp_log_level_set("httpd", ESP_LOG_VERBOSE);
+#endif
  
     // Check partition table to ensure consistancy after OTA update
     ESP_ERROR_CHECK(check_ota_partitions());
@@ -199,6 +204,22 @@ void app_main(void) {
 
 #endif
 
+    } else {
+        ESP_LOGI(TAG, "WiFi is NOT provisioned!");
+        // get provisioning status bit and inform user that it is in progress (or not)
+        // if WEB provisioning is enabled, the web server will handle the provisioning process and update the status bit accordingly
+        if (xEventGroupGetBits(g_sys_events) & BIT_WIFI_PROVISIONING_IN_PROGRESS) {
+            ESP_LOGI(TAG, "Provisioning status: IN PROGRESS");
+#if _DEVICE_ENABLE_WIFI_WEB_PROVISIONING
+            ESP_LOGI(TAG, "WEB provisioning ENABLED!");
+            // start web server
+            ESP_LOGI(TAG, "WEB and/or HTTP API ENABLED!");
+
+            xTaskCreate(run_http_server, "run_http_server", 16384, NULL, 5, NULL);
+#endif
+        } else {
+            ESP_LOGI(TAG, "Provisioning status: NOT IN PROGRESS");
+        }
     }
 #endif
 

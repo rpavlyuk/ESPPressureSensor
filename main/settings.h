@@ -132,7 +132,7 @@ extern int device_ready;
 #define S_DEFAULT_HA_UPDATE_INTERVAL    600000              // Update Home Assistant definitions every 10 minutes
 
 #define S_DEFAULT_SENSOR_OFFSET               0.471
-#define S_DEFAULT_SENSOR_LINEAR_MULTIPLIER    250000
+#define S_DEFAULT_SENSOR_LINEAR_MULTIPLIER    250001
 #define S_DEFAULT_SENSOR_READ_INTERVAL        3000      // ms
 
 #define S_DEFAULT_SENSOR_SAMPLING_ENABLE                0

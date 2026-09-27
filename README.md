@@ -92,8 +92,11 @@ You may consider the other IO pin so you can change `PRESSURE_SENSOR_PIN` in fil
 
 ## Initiation
 ### WiFi Setup
-* On the first boot, the device will start in access point mode with the SSID `PROV_AP_XXXXXX`. The exact named will be different depending on the device hardware ID (which is built in). The password is SSID name plus `1234`. For example, `PROV_AP_XXXXXX1234`
+After the first boot, the device will start in access point mode with the SSID `PROV_AP_XXXXXX`. The exact named will be different depending on the device hardware ID (which is built in). The password is SSID name plus `1234`. For example, `PROV_AP_XXXXXX1234`
+
+You have two options to move on:
 * Use the *ESP SoftAP Prov* ([iOS](https://apps.apple.com/us/app/esp-softap-provisioning/id1474040630), [Android](https://play.google.com/store/apps/details?id=com.espressif.provsoftap&hl=en)) mobile app to connect to the device and configure WiFi settings. Read more [here](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/provisioning/provisioning.html#provisioning-tools) if you want to know more about the SoftAP provisioning.
+* OR once connected to `PROV_AP_XXXXXX` SSID, navigate to [http://192.168.4.1:8080](http://192.168.4.1:8080/) in your browser and enter the credentials on WiFi setup page. **NOTE**: The page doesn't check the validity of WiFi credentials and the connectivity, thus you may need to wipe and re-flash the device again if the Wi-Fi settings were entered incorrectly or Wi-Fi network is out of reach.
 
 ### Device Setup
 * Device will initiate itself with default settings once the WiFi was provisioned. All further configuration, including **sensor calibration**, will/can be made via WEB interface.
@@ -160,6 +163,8 @@ http://<WIFI-IP>/status-data
 
 ## License and Credits
 * GPLv3 -- you're free to use and modify the code
-* Uses [ESP32_NVS](https://github.com/VPavlusha/ESP32_NVS) library by [VPavlusha](https://github.com/VPavlusha)
+* Uses:
+  * [ESP32_NVS](https://github.com/VPavlusha/ESP32_NVS) library by [VPavlusha](https://github.com/VPavlusha)🇺🇦
+  * [esp-idf-net-logging](https://github.com/nopnop2002/esp-idf-net-logging) library by [nopnop2002](https://github.com/nopnop2002)🇯🇵
 * Consider putting a star if you like the project
 * Find me at roman.pavlyuk@gmail.com
